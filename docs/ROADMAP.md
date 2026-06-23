@@ -17,15 +17,31 @@
 - explicit `UNKNOWN` result when evidence is insufficient
 - synthetic fixtures and CLI report
 
-## Phase 1 — Ibex Simple System adapters
+## Phase 1A — official Ibex text-trace adapter ✅
 
-- parse `trace_core_00000000.log`
-- preserve raw simulator output
-- capture Ibex commit/config/tool versions
-- convert architectural events to JSONL
-- extract cycle boundaries and causal signals from trace or waveform evidence
+- parse documented `trace_core_<HARTID>.log` format
+- preserve raw-input SHA-256
+- extract simulation time, cycle, PC, instruction, disassembly, registers, and memory evidence
+- preserve compressed versus uncompressed instruction width in metadata
+- convert architectural events and cycle gaps to JSONL
+- fail with source-line context on unsupported input
+- fixture tests pinned to lowRISC/ibex commit `022f084096baed0a9b5ebdf697ed2965f13e8ed8`
+
+## Phase 1B — reproducible Ibex simulator run
+
+- build an explicitly pinned Ibex revision
+- compile a known bare-metal test
+- run Ibex Simple System under Verilator
+- retain raw trace, stdout, stderr, commands, versions, configuration, and binary hash
+- feed the generated trace into the Phase 1A adapter
+- publish a reproducible evidence bundle
+
+## Phase 1C — causal timing signal adapter
+
+- extract cycle boundaries and supported causal signals from waveform or simulator instrumentation
 - map real Ibex signals into normalized timing samples
-- fixture tests from a pinned upstream revision
+- distinguish observation (`memory_access`) from causal proof (`memory_wait_cycles`, `data_ready=false`)
+- add pinned waveform fixtures and deterministic extraction tests
 
 ## Phase 2 — reference ISA oracle
 
