@@ -6,6 +6,7 @@ build/
 dist/
 artifacts/
 third_party/ibex/
+.cache/
 .pytest_cache/
 .coverage
 .DS_Store
