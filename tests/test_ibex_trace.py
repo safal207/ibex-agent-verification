@@ -31,6 +31,29 @@ class IbexTraceParserTests(unittest.TestCase):
         self.assertEqual(result.records[-1].cycle, 67)
         self.assertEqual(len(result.source_sha256), 64)
 
+    def test_real_verilator_insn_header_parses(self):
+        result = parse_ibex_trace_lines(
+            [
+                (
+                    "Time\tCycle\tPC\tInsn\tDecoded instruction\t"
+                    "Register and memory contents\n"
+                ),
+                (
+                    "20\t6\t00100080\t2d00006f\tjal\tx0,100350\t"
+                    "x0=0x00000000\n"
+                ),
+                (
+                    "22\t7\t00100350\t00000093\taddi\tx1,x0,0\t"
+                    "x0:0x00000000 x1=0x00000000\n"
+                ),
+            ],
+            source="real-verilator.log",
+        )
+        self.assertEqual(result.header_lines, 1)
+        self.assertEqual(len(result.records), 2)
+        self.assertEqual(result.records[0].mnemonic, "jal")
+        self.assertEqual(result.records[1].register_write.name, "x1")
+
     def test_compressed_and_uncompressed_widths_are_preserved(self):
         records = load_ibex_trace(FIXTURE).records
         self.assertEqual(records[0].instruction_width_bits, 16)
