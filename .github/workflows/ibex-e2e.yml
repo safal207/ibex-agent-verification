@@ -59,7 +59,7 @@ jobs:
         run: python -m pip install -e .
 
       - name: Run pinned Ibex simulation and build evidence
-        run: ./scripts/run_ibex_e2e.sh
+        run: bash ./scripts/run_ibex_e2e.sh
 
       - name: Show evidence summary
         if: always()
