@@ -1,0 +1,80 @@
+name: Ibex Verilator E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ibex-e2e.yml"
+      - "scripts/run_ibex_e2e.sh"
+      - "src/ibex_agent_verification/**"
+      - "tests/**"
+      - "pyproject.toml"
+  pull_request:
+    paths:
+      - ".github/workflows/ibex-e2e.yml"
+      - "scripts/run_ibex_e2e.sh"
+      - "src/ibex_agent_verification/**"
+      - "tests/**"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ibex-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verilator-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      IBEX_REF: 022f084096baed0a9b5ebdf697ed2965f13e8ed8
+      IBEX_CONFIG: small
+      EVIDENCE_DIR: artifacts/ibex-e2e
+
+    steps:
+      - name: Check out verification project
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils-riscv64-unknown-elf \
+            build-essential \
+            gcc-riscv64-unknown-elf \
+            libelf-dev \
+            srecord \
+            verilator
+
+      - name: Install verification project
+        run: python -m pip install -e .
+
+      - name: Run pinned Ibex simulation and build evidence
+        run: ./scripts/run_ibex_e2e.sh
+
+      - name: Show evidence summary
+        if: always()
+        run: |
+          if [[ -f artifacts/ibex-e2e/manifest.json ]]; then
+            python -m json.tool artifacts/ibex-e2e/manifest.json
+          else
+            echo "No final manifest was produced; inspect partial logs in the artifact."
+          fi
+
+      - name: Upload reproducible evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ibex-verilator-evidence-${{ github.sha }}
+          path: artifacts/ibex-e2e/
+          if-no-files-found: warn
+          retention-days: 14
