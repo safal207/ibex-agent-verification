@@ -23,7 +23,7 @@ permissions:
 
 concurrency:
   group: ibex-e2e-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   verilator-e2e:
