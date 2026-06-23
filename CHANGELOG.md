@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — 2026-06-24
+
+- Added a pinned Ibex Simple System build and Verilator execution workflow.
+- Added upstream `hello_test` compilation and output validation.
+- Added complete and partial GitHub Actions evidence artifact uploads.
+- Added raw simulator logs, instruction trace, performance counters, and ELF preservation.
+- Added normalized architectural, metadata, and timing outputs from the real trace.
+- Added an evidence manifest with project/DUT commits, tool versions, commands, byte sizes, and SHA-256 hashes.
+- Added evidence-manifest tests and E2E documentation.
+- Kept hosted-run success explicitly unconfirmed until GitHub Actions produces a completed artifact.
+
 ## 0.3.0 — 2026-06-24
 
 - Added a strict parser for the official lowRISC Ibex instruction-trace format.

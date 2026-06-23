@@ -3,6 +3,7 @@
 > Deterministic, agent-friendly verification scaffolding for the lowRISC Ibex RISC-V core.
 
 [![CI](https://github.com/safal207/ibex-agent-verification/actions/workflows/ci.yml/badge.svg)](https://github.com/safal207/ibex-agent-verification/actions/workflows/ci.yml)
+[![Ibex Verilator E2E](https://github.com/safal207/ibex-agent-verification/actions/workflows/ibex-e2e.yml/badge.svg)](https://github.com/safal207/ibex-agent-verification/actions/workflows/ibex-e2e.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-early%20prototype-orange.svg)](docs/ROADMAP.md)
 
@@ -10,13 +11,14 @@
 
 Hardware verification produces large traces, failing programs, waveforms, logs, and configuration details. AI coding agents can help generate tests and reduce failures, but only if the evidence path stays deterministic and reviewable.
 
-This repository currently provides three narrow capabilities:
+This repository currently provides four narrow capabilities:
 
-1. parse the official human-readable Ibex instruction trace into normalized evidence;
-2. compare architectural execution events with an expected trace;
-3. detect cycle deviations and rank evidence-backed timing causes;
-4. emit machine-readable reports and stable process exit codes;
-5. keep every future AI-generated action behind reproducible artifacts.
+1. run a pinned Ibex Simple System experiment under Verilator;
+2. parse the official human-readable Ibex instruction trace into normalized evidence;
+3. compare architectural execution events with an expected trace;
+4. detect cycle deviations and rank evidence-backed timing causes;
+5. emit machine-readable reports and reproducible evidence bundles;
+6. keep every future AI-generated action behind deterministic artifacts.
 
 ## Status — read this first
 
@@ -25,9 +27,10 @@ This is an **early, honest prototype**.
 - The architectural JSONL comparator works and is covered by tests.
 - The timing analyzer works on normalized timing samples.
 - The official Ibex text-trace adapter is tested against a pinned example from lowRISC documentation.
-- The repository does **not** yet claim an end-to-end Verilator run, complete Ibex correctness checking, or physical timing verification.
+- A pinned Verilator E2E workflow now builds and runs upstream `hello_test` and preserves raw and normalized evidence.
+- The first successful hosted E2E run must still be confirmed by GitHub Actions; adding the workflow is not itself proof that the external toolchain completed.
 - Waveform signal extraction, a reference ISA oracle, generated programs, and failure minimization remain roadmap items.
-- No benchmark, coverage, or bug-finding performance claim is made.
+- No benchmark, coverage, silicon-signoff, or bug-finding performance claim is made.
 
 ## Quick start
 
@@ -58,12 +61,48 @@ ibex-av compare \
   --report artifacts/pass-report.json
 ```
 
-Or run:
+Run local deterministic tests and fixtures:
 
 ```bash
 make test
 make demo
 ```
+
+Run the real pinned Ibex experiment after installing the external prerequisites:
+
+```bash
+./scripts/run_ibex_e2e.sh
+```
+
+## Pinned Verilator E2E experiment
+
+The E2E workflow follows the upstream Ibex Simple System sequence:
+
+```text
+pinned lowRISC/ibex commit
+        ↓
+FuseSoC builds Vibex_simple_system
+        ↓
+RISC-V GCC builds hello_test.elf
+        ↓
+Verilator runs the program
+        ↓
+raw trace + counters + logs
+        ↓
+normalized JSONL + timing report
+        ↓
+manifest with commands, versions, and SHA-256
+```
+
+Default device-under-test revision:
+
+```text
+022f084096baed0a9b5ebdf697ed2965f13e8ed8
+```
+
+The GitHub Actions job uploads `artifacts/ibex-e2e/` even when a later step fails, so build or simulator failures remain inspectable. A successful bundle requires a real simulator exit, the expected `Hello simple system` output, a non-empty instruction trace, parser success, and a completed manifest.
+
+See [Pinned Ibex Verilator E2E Run](docs/IBEX_VERILATOR_E2E.md).
 
 ## Official Ibex trace adapter
 
@@ -113,10 +152,14 @@ Confidence is a deterministic rule score, **not** a statistical probability. See
 
 ```text
 .
+├── .github/workflows/
+│   ├── ci.yml
+│   └── ibex-e2e.yml
 ├── AGENTS.md
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── IBEX_TRACE_ADAPTER.md
+│   ├── IBEX_VERILATOR_E2E.md
 │   ├── ROADMAP.md
 │   ├── TIMING_ANALYSIS.md
 │   └── VERIFICATION_PROTOCOL.md
@@ -126,10 +169,12 @@ Confidence is a deterministic rule score, **not** a statistical probability. See
 ├── scripts/
 │   ├── bootstrap_ibex.sh
 │   ├── build_ibex_simple_system.sh
-│   └── run_fixture_demo.sh
+│   ├── run_fixture_demo.sh
+│   └── run_ibex_e2e.sh
 ├── src/ibex_agent_verification/
 │   ├── cli.py
 │   ├── comparator.py
+│   ├── evidence.py
 │   ├── ibex_trace.py
 │   ├── models.py
 │   ├── timing.py
@@ -154,19 +199,6 @@ One JSON object per line:
 ```
 
 Hex strings and integers are accepted for numeric fields and normalized before comparison.
-
-## Ibex integration path
-
-The official Ibex Simple System can run bare-metal programs in a Verilator simulation and produce `trace_core_00000000.log`.
-
-```bash
-./scripts/bootstrap_ibex.sh
-./scripts/build_ibex_simple_system.sh
-```
-
-The build script validates prerequisites and follows upstream commands. It does not hide missing toolchain setup or silently substitute a fake simulator.
-
-The current parser closes the text-format boundary. The next integration layer must execute a pinned Ibex simulation, preserve the generated raw trace and tool manifest, and extract waveform or internal signals for stronger timing diagnosis.
 
 ## Verification principle
 
