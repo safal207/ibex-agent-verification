@@ -27,14 +27,20 @@
 - fail with source-line context on unsupported input
 - fixture tests pinned to lowRISC/ibex commit `022f084096baed0a9b5ebdf697ed2965f13e8ed8`
 
-## Phase 1B — reproducible Ibex simulator run
+## Phase 1B — reproducible Ibex simulator run 🧪
 
-- build an explicitly pinned Ibex revision
-- compile a known bare-metal test
-- run Ibex Simple System under Verilator
-- retain raw trace, stdout, stderr, commands, versions, configuration, and binary hash
-- feed the generated trace into the Phase 1A adapter
-- publish a reproducible evidence bundle
+Implementation is present; a successful hosted GitHub Actions run is still required before this phase is marked complete.
+
+- ✅ pin an explicit Ibex revision and configuration
+- ✅ install and record Verilator, FuseSoC, RISC-V GCC, Make, Git, Python, and pip versions
+- ✅ build Ibex Simple System under Verilator
+- ✅ compile upstream `hello_test.elf`
+- ✅ validate the real program output
+- ✅ retain raw trace, counters, stdout, stderr, commands, versions, configuration, ELF, and hashes
+- ✅ feed the generated trace into the Phase 1A adapter
+- ✅ create a versioned evidence manifest with SHA-256 per file
+- ✅ upload complete or partial evidence from GitHub Actions
+- ⏳ confirm the first successful hosted run and inspect its artifact
 
 ## Phase 1C — causal timing signal adapter
 
