@@ -44,7 +44,7 @@ run_logged() {
 }
 
 first_line() {
-  "$@" 2>&1 | head -n 1 | tr '\n' ' '
+  "$@" 2>&1 | sed -n '1p' | tr '\n' ' '
 }
 
 for command in git make python3 verilator; do
@@ -56,7 +56,9 @@ done
 # riscv32 prefix, so create local aliases without changing the upstream tree.
 if ! command -v riscv32-unknown-elf-gcc >/dev/null 2>&1; then
   require_command riscv64-unknown-elf-gcc
-  TOOL_ALIAS_DIR="$EVIDENCE_DIR/toolchain-bin"
+  TOOL_ALIAS_ROOT="${RUNNER_TEMP:-$PROJECT_ROOT/.cache}"
+  TOOL_ALIAS_DIR="$TOOL_ALIAS_ROOT/ibex-riscv32-toolchain"
+  rm -rf "$TOOL_ALIAS_DIR"
   mkdir -p "$TOOL_ALIAS_DIR"
   for tool in gcc objcopy objdump ar as ld nm ranlib readelf size strings strip; do
     source_tool="$(command -v "riscv64-unknown-elf-$tool" || true)"
