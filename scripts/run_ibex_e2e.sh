@@ -19,15 +19,51 @@ NORMALIZED_DIR="$EVIDENCE_DIR/normalized"
 LOG_DIR="$EVIDENCE_DIR/logs"
 COMMANDS_FILE="$EVIDENCE_DIR/commands.sh"
 TOOL_VERSIONS_FILE="$EVIDENCE_DIR/tool-versions.txt"
+CURRENT_STAGE="initialization"
 
 rm -rf "$EVIDENCE_DIR"
 mkdir -p "$RAW_DIR" "$NORMALIZED_DIR" "$LOG_DIR"
 printf '#!/usr/bin/env bash\nset -euo pipefail\n\n' > "$COMMANDS_FILE"
 
+print_log_tail() {
+  local path="$1"
+  [[ -f "$path" ]] || return 0
+  echo
+  echo "===== ${path#$EVIDENCE_DIR/} (last 100 lines) ====="
+  tail -n 100 "$path" || true
+}
+
+print_failure_evidence() {
+  local status="$1"
+  echo "::error::Ibex E2E failed during stage '$CURRENT_STAGE' with exit code $status" >&2
+  echo "Evidence directory: $EVIDENCE_DIR" >&2
+
+  local path
+  while IFS= read -r -d '' path; do
+    print_log_tail "$path"
+  done < <(find "$LOG_DIR" "$RAW_DIR" -maxdepth 1 -type f \
+    \( -name '*.stdout' -o -name '*.stderr' -o -name '*.log' \) \
+    -print0 2>/dev/null | sort -z)
+}
+
+on_error() {
+  local status=$?
+  trap - ERR
+  print_failure_evidence "$status"
+  exit "$status"
+}
+trap on_error ERR
+
+fail() {
+  local message="$1"
+  echo "::error::$message" >&2
+  print_failure_evidence 2
+  exit 2
+}
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "Missing required command: $1" >&2
-    exit 2
+    fail "Missing required command: $1"
   fi
 }
 
@@ -39,14 +75,21 @@ record_command() {
 run_logged() {
   local name="$1"
   shift
+  CURRENT_STAGE="$name"
+  echo "::group::E2E stage: $name"
+  printf 'Command: '
+  printf '%q ' "$@"
+  printf '\n'
   record_command "$@"
   "$@" >"$LOG_DIR/${name}.stdout" 2>"$LOG_DIR/${name}.stderr"
+  echo "::endgroup::"
 }
 
 first_line() {
   "$@" 2>&1 | sed -n '1p' | tr '\n' ' '
 }
 
+CURRENT_STAGE="checking required commands"
 for command in git make python3 verilator; do
   require_command "$command"
 done
@@ -54,6 +97,7 @@ done
 # Ubuntu commonly provides a riscv64-prefixed bare-metal toolchain that can
 # still emit RV32 code with -march=rv32imc -mabi=ilp32. Ibex's Makefile uses a
 # riscv32 prefix, so create local aliases without changing the upstream tree.
+CURRENT_STAGE="preparing RISC-V toolchain aliases"
 if ! command -v riscv32-unknown-elf-gcc >/dev/null 2>&1; then
   require_command riscv64-unknown-elf-gcc
   TOOL_ALIAS_ROOT="${RUNNER_TEMP:-$PROJECT_ROOT/.cache}"
@@ -70,6 +114,7 @@ if ! command -v riscv32-unknown-elf-gcc >/dev/null 2>&1; then
 fi
 require_command riscv32-unknown-elf-gcc
 
+CURRENT_STAGE="preparing Ibex checkout"
 rm -rf "$IBEX_DIR"
 mkdir -p "$(dirname "$IBEX_DIR")"
 run_logged git-init git init "$IBEX_DIR"
@@ -82,6 +127,7 @@ run_logged ibex-python-requirements \
   python3 -m pip install --disable-pip-version-check -r "$IBEX_DIR/python-requirements.txt"
 require_command fusesoc
 
+CURRENT_STAGE="recording tool versions"
 {
   printf 'python=%s\n' "$(first_line python3 --version)"
   printf 'pip=%s\n' "$(first_line python3 -m pip --version)"
@@ -93,6 +139,7 @@ require_command fusesoc
 } > "$TOOL_VERSIONS_FILE"
 
 pushd "$IBEX_DIR" >/dev/null
+CURRENT_STAGE="resolving Ibex configuration"
 IBEX_OPTIONS_STRING="$(python3 util/ibex_config.py "$IBEX_CONFIG" fusesoc_opts)"
 read -r -a IBEX_OPTIONS <<< "$IBEX_OPTIONS_STRING"
 run_logged build-simulator \
@@ -102,35 +149,35 @@ run_logged build-hello make -C examples/sw/simple_system/hello_test
 
 SIMULATOR="./build/lowrisc_ibex_ibex_simple_system_0/sim-verilator/Vibex_simple_system"
 HELLO_ELF="./examples/sw/simple_system/hello_test/hello_test.elf"
+CURRENT_STAGE="validating build outputs"
 if [[ ! -x "$SIMULATOR" ]]; then
-  echo "Simulator binary was not produced: $SIMULATOR" >&2
-  exit 2
+  fail "Simulator binary was not produced: $SIMULATOR"
 fi
 if [[ ! -f "$HELLO_ELF" ]]; then
-  echo "Hello-test ELF was not produced: $HELLO_ELF" >&2
-  exit 2
+  fail "Hello-test ELF was not produced: $HELLO_ELF"
 fi
 
+CURRENT_STAGE="running simulator"
 record_command "$SIMULATOR" "--meminit=ram,$HELLO_ELF"
 "$SIMULATOR" "--meminit=ram,$HELLO_ELF" \
   >"$RAW_DIR/simulator.stdout" 2>"$RAW_DIR/simulator.stderr"
 
+CURRENT_STAGE="collecting simulator outputs"
 for required_file in \
   trace_core_00000000.log \
   ibex_simple_system.log \
   ibex_simple_system_pcount.csv; do
   if [[ ! -s "$required_file" ]]; then
-    echo "Expected simulator output is missing or empty: $required_file" >&2
-    exit 2
+    fail "Expected simulator output is missing or empty: $required_file"
   fi
   cp "$required_file" "$RAW_DIR/$required_file"
 done
 cp "$HELLO_ELF" "$RAW_DIR/hello_test.elf"
 popd >/dev/null
 
+CURRENT_STAGE="validating hello_test output"
 if ! grep -Fq "Hello simple system" "$RAW_DIR/ibex_simple_system.log"; then
-  echo "hello_test output did not contain the expected greeting" >&2
-  exit 2
+  fail "hello_test output did not contain the expected greeting"
 fi
 
 run_logged parse-trace \
@@ -141,6 +188,7 @@ run_logged parse-trace \
   --timing-output "$NORMALIZED_DIR/timing.jsonl" \
   --report "$NORMALIZED_DIR/parser-report.json"
 
+CURRENT_STAGE="analyzing timing"
 set +e
 record_command python3 -m ibex_agent_verification analyze-timing \
   --input "$NORMALIZED_DIR/timing.jsonl" \
@@ -153,11 +201,11 @@ TIMING_EXIT_CODE=$?
 set -e
 
 if [[ "$TIMING_EXIT_CODE" -ne 0 && "$TIMING_EXIT_CODE" -ne 1 ]]; then
-  echo "Timing analyzer failed with exit code $TIMING_EXIT_CODE" >&2
-  exit 2
+  fail "Timing analyzer failed with exit code $TIMING_EXIT_CODE"
 fi
 printf '%s\n' "$TIMING_EXIT_CODE" > "$EVIDENCE_DIR/timing-exit-code.txt"
 
+CURRENT_STAGE="building evidence manifest"
 PROJECT_SHA="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
 record_command python3 -m ibex_agent_verification.evidence \
   --evidence-dir "$EVIDENCE_DIR" \
@@ -180,6 +228,7 @@ python3 -m ibex_agent_verification.evidence \
   --tool-versions-file "$TOOL_VERSIONS_FILE" \
   --commands-file "$COMMANDS_FILE"
 
+trap - ERR
 printf 'Ibex E2E evidence bundle created at %s\n' "$EVIDENCE_DIR"
 printf 'Ibex commit: %s\n' "$IBEX_RESOLVED_SHA"
 printf 'Timing analyzer exit code: %s\n' "$TIMING_EXIT_CODE"
