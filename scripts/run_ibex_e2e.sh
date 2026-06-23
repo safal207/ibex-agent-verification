@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IBEX_REF="${IBEX_REF:-022f084096baed0a9b5ebdf697ed2965f13e8ed8}"
@@ -46,14 +46,6 @@ print_failure_evidence() {
     -print0 2>/dev/null | sort -z)
 }
 
-on_error() {
-  local status=$?
-  trap - ERR
-  print_failure_evidence "$status"
-  exit "$status"
-}
-trap on_error ERR
-
 fail() {
   local message="$1"
   echo "::error::$message" >&2
@@ -81,7 +73,18 @@ run_logged() {
   printf '%q ' "$@"
   printf '\n'
   record_command "$@"
+
+  local status=0
+  set +e
   "$@" >"$LOG_DIR/${name}.stdout" 2>"$LOG_DIR/${name}.stderr"
+  status=$?
+  set -e
+
+  if [[ "$status" -ne 0 ]]; then
+    echo "::endgroup::"
+    print_failure_evidence "$status"
+    exit "$status"
+  fi
   echo "::endgroup::"
 }
 
@@ -94,25 +97,26 @@ for command in git make python3 verilator; do
   require_command "$command"
 done
 
-# Ubuntu commonly provides a riscv64-prefixed bare-metal toolchain that can
-# still emit RV32 code with -march=rv32imc -mabi=ilp32. Ibex's Makefile uses a
-# riscv32 prefix, so create local aliases without changing the upstream tree.
-CURRENT_STAGE="preparing RISC-V toolchain aliases"
-if ! command -v riscv32-unknown-elf-gcc >/dev/null 2>&1; then
-  require_command riscv64-unknown-elf-gcc
-  TOOL_ALIAS_ROOT="${RUNNER_TEMP:-$PROJECT_ROOT/.cache}"
-  TOOL_ALIAS_DIR="$TOOL_ALIAS_ROOT/ibex-riscv32-toolchain"
-  rm -rf "$TOOL_ALIAS_DIR"
-  mkdir -p "$TOOL_ALIAS_DIR"
-  for tool in gcc objcopy objdump ar as ld nm ranlib readelf size strings strip; do
-    source_tool="$(command -v "riscv64-unknown-elf-$tool" || true)"
-    if [[ -n "$source_tool" ]]; then
-      ln -sf "$source_tool" "$TOOL_ALIAS_DIR/riscv32-unknown-elf-$tool"
-    fi
-  done
-  export PATH="$TOOL_ALIAS_DIR:$PATH"
+CURRENT_STAGE="selecting RISC-V toolchain"
+if command -v riscv32-unknown-elf-gcc >/dev/null 2>&1; then
+  RISCV_PREFIX="riscv32-unknown-elf"
+elif command -v riscv64-unknown-elf-gcc >/dev/null 2>&1; then
+  RISCV_PREFIX="riscv64-unknown-elf"
+else
+  fail "Missing bare-metal RISC-V GCC toolchain"
 fi
-require_command riscv32-unknown-elf-gcc
+RISCV_CC="${RISCV_PREFIX}-gcc"
+RISCV_OBJCOPY="${RISCV_PREFIX}-objcopy"
+RISCV_OBJDUMP="${RISCV_PREFIX}-objdump"
+require_command "$RISCV_CC"
+require_command "$RISCV_OBJCOPY"
+require_command "$RISCV_OBJDUMP"
+
+CURRENT_STAGE="validating RV32 compiler support"
+COMPILER_PROBE="$EVIDENCE_DIR/rv32-toolchain-probe.o"
+printf 'int probe(void) { return 0; }\n' | \
+  "$RISCV_CC" -march=rv32imc -mabi=ilp32 -ffreestanding -x c -c -o "$COMPILER_PROBE" -
+rm -f "$COMPILER_PROBE"
 
 CURRENT_STAGE="preparing Ibex checkout"
 rm -rf "$IBEX_DIR"
@@ -133,7 +137,7 @@ CURRENT_STAGE="recording tool versions"
   printf 'pip=%s\n' "$(first_line python3 -m pip --version)"
   printf 'fusesoc=%s\n' "$(first_line fusesoc --version)"
   printf 'verilator=%s\n' "$(first_line verilator --version)"
-  printf 'riscv_gcc=%s\n' "$(first_line riscv32-unknown-elf-gcc --version)"
+  printf 'riscv_gcc=%s\n' "$(first_line "$RISCV_CC" --version)"
   printf 'make=%s\n' "$(first_line make --version)"
   printf 'git=%s\n' "$(first_line git --version)"
 } > "$TOOL_VERSIONS_FILE"
@@ -145,7 +149,11 @@ read -r -a IBEX_OPTIONS <<< "$IBEX_OPTIONS_STRING"
 run_logged build-simulator \
   fusesoc --cores-root=. run --target=sim --setup --build \
   lowrisc:ibex:ibex_simple_system "${IBEX_OPTIONS[@]}"
-run_logged build-hello make -C examples/sw/simple_system/hello_test
+run_logged build-hello \
+  make -C examples/sw/simple_system/hello_test \
+  "CC=$RISCV_CC" \
+  "OBJCOPY=$RISCV_OBJCOPY" \
+  "OBJDUMP=$RISCV_OBJDUMP"
 
 SIMULATOR="./build/lowrisc_ibex_ibex_simple_system_0/sim-verilator/Vibex_simple_system"
 HELLO_ELF="./examples/sw/simple_system/hello_test/hello_test.elf"
@@ -159,8 +167,15 @@ fi
 
 CURRENT_STAGE="running simulator"
 record_command "$SIMULATOR" "--meminit=ram,$HELLO_ELF"
+set +e
 "$SIMULATOR" "--meminit=ram,$HELLO_ELF" \
   >"$RAW_DIR/simulator.stdout" 2>"$RAW_DIR/simulator.stderr"
+SIMULATOR_EXIT_CODE=$?
+set -e
+if [[ "$SIMULATOR_EXIT_CODE" -ne 0 ]]; then
+  print_failure_evidence "$SIMULATOR_EXIT_CODE"
+  exit "$SIMULATOR_EXIT_CODE"
+fi
 
 CURRENT_STAGE="collecting simulator outputs"
 for required_file in \
@@ -228,7 +243,6 @@ python3 -m ibex_agent_verification.evidence \
   --tool-versions-file "$TOOL_VERSIONS_FILE" \
   --commands-file "$COMMANDS_FILE"
 
-trap - ERR
 printf 'Ibex E2E evidence bundle created at %s\n' "$EVIDENCE_DIR"
 printf 'Ibex commit: %s\n' "$IBEX_RESOLVED_SHA"
 printf 'Timing analyzer exit code: %s\n' "$TIMING_EXIT_CODE"
