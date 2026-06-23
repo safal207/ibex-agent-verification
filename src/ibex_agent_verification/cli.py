@@ -6,6 +6,12 @@ import sys
 from pathlib import Path
 
 from .comparator import compare_traces
+from .ibex_trace import (
+    load_ibex_trace,
+    write_architectural_jsonl,
+    write_metadata_jsonl,
+    write_timing_jsonl,
+)
 from .models import TraceValidationError
 from .timing import analyze_timing, load_timing_jsonl
 from .trace_io import load_jsonl
@@ -14,7 +20,10 @@ from .trace_io import load_jsonl
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ibex-av",
-        description="Deterministically compare Ibex traces and analyze timing anomalies.",
+        description=(
+            "Parse official Ibex traces, compare architectural events, "
+            "and analyze timing anomalies."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -29,6 +38,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     timing.add_argument("--input", required=True, help="timing JSONL input")
     timing.add_argument("--report", help="optional JSON report output path")
+
+    ibex_trace = subparsers.add_parser(
+        "parse-ibex-trace",
+        help="convert trace_core_<HARTID>.log into normalized JSONL evidence",
+    )
+    ibex_trace.add_argument("--input", required=True, help="raw Ibex tracer log")
+    ibex_trace.add_argument(
+        "--output", required=True, help="architectural JSONL output path"
+    )
+    ibex_trace.add_argument(
+        "--metadata-output",
+        help="optional JSONL with cycle, decoded instruction, width, and reads",
+    )
+    ibex_trace.add_argument(
+        "--timing-output",
+        help="optional timing JSONL derived from consecutive retired cycles",
+    )
+    ibex_trace.add_argument(
+        "--expected-cycles",
+        type=int,
+        default=1,
+        help="baseline retirement gap used for timing output (default: 1)",
+    )
+    ibex_trace.add_argument("--report", help="optional parser summary JSON path")
     return parser
 
 
@@ -54,6 +87,29 @@ def main(argv: list[str] | None = None) -> int:
             result = analyze_timing(load_timing_jsonl(args.input))
             payload = result.to_dict()
             exit_code = 1 if result.has_anomalies else 0
+        elif args.command == "parse-ibex-trace":
+            result = load_ibex_trace(args.input)
+            write_architectural_jsonl(result, args.output)
+            if args.metadata_output:
+                write_metadata_jsonl(result, args.metadata_output)
+            if args.timing_output:
+                write_timing_jsonl(
+                    result,
+                    args.timing_output,
+                    expected_cycles=args.expected_cycles,
+                )
+            payload = result.summary()
+            payload.update(
+                {
+                    "architectural_output": args.output,
+                    "metadata_output": args.metadata_output,
+                    "timing_output": args.timing_output,
+                    "expected_cycles": (
+                        args.expected_cycles if args.timing_output else None
+                    ),
+                }
+            )
+            exit_code = 0
         else:
             return 2
     except TraceValidationError as exc:
