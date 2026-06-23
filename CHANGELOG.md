@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — 2026-06-24
+
+- Added a strict parser for the official lowRISC Ibex instruction-trace format.
+- Added architectural, metadata, and timing JSONL outputs.
+- Added source SHA-256 reporting and source-line validation errors.
+- Added support for compressed/uncompressed instruction width, register reads/writes, and memory evidence.
+- Added a pinned documentation-derived fixture from lowRISC/ibex commit `022f084096baed0a9b5ebdf697ed2965f13e8ed8`.
+- Added CLI, demo integration, tests, and adapter documentation.
+- Preserved the distinction between observed memory access and proven memory wait.
+
 ## 0.2.0 — 2026-06-24
 
 - Added deterministic timing-sample JSONL contract.
