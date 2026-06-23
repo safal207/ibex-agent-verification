@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ibex-agent-verification"
-version = "0.2.0"
-description = "Deterministic trace comparison and timing root cause analysis for lowRISC Ibex"
+version = "0.3.0"
+description = "Deterministic Ibex trace parsing, comparison, and timing root cause analysis"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
