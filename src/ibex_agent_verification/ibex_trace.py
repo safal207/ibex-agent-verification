@@ -27,7 +27,9 @@ _REGISTER_ACCESS_RE = re.compile(
 _MEMORY_ADDRESS_RE = re.compile(r"(?<!\S)PA:0x(?P<value>[0-9a-fA-F]+)")
 _STORE_RE = re.compile(r"(?<!\S)store:0x(?P<value>[0-9a-fA-F]+)")
 _LOAD_RE = re.compile(r"(?<!\S)load:0x(?P<value>[0-9a-fA-F]+)")
-_HEADER_RE = re.compile(r"^\s*Time\s+Cycle\s+PC\s+Instr\b", re.IGNORECASE)
+_HEADER_RE = re.compile(
+    r"^\s*Time\s+Cycle\s+PC\s+(?:Instr|Insn)\b", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
