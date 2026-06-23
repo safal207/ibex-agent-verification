@@ -33,6 +33,7 @@ jobs:
       IBEX_REF: 022f084096baed0a9b5ebdf697ed2965f13e8ed8
       IBEX_CONFIG: small
       EVIDENCE_DIR: artifacts/ibex-e2e
+      ARCH: rv32imc_zicsr
 
     steps:
       - name: Check out verification project
