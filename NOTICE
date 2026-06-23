@@ -1,0 +1,4 @@
+Ibex Agent Verification
+Copyright 2026 Aleksei Safonov
+
+This project is independent from lowRISC. "Ibex" refers to the upstream open-source RISC-V CPU project maintained by lowRISC. Upstream source is not included in this repository and remains subject to its own license and NOTICE files.
