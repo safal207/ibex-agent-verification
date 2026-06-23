@@ -10,23 +10,23 @@
 
 Hardware verification produces large traces, failing programs, waveforms, logs, and configuration details. AI coding agents can help generate tests and reduce failures, but only if the evidence path stays deterministic and reviewable.
 
-This repository starts with two narrow capabilities:
+This repository currently provides three narrow capabilities:
 
-1. compare architectural execution events with an expected trace;
-2. detect cycle deviations and rank evidence-backed timing causes;
-3. emit machine-readable reports and stable process exit codes;
-4. keep every future AI-generated action behind reproducible artifacts.
-
-The intended target is the **lowRISC Ibex Simple System**, which can run bare-metal binaries in a Verilator simulation and produces an instruction trace. Ibex itself is not vendored here; the bootstrap script clones the official upstream repository.
+1. parse the official human-readable Ibex instruction trace into normalized evidence;
+2. compare architectural execution events with an expected trace;
+3. detect cycle deviations and rank evidence-backed timing causes;
+4. emit machine-readable reports and stable process exit codes;
+5. keep every future AI-generated action behind reproducible artifacts.
 
 ## Status — read this first
 
 This is an **early, honest prototype**.
 
-- The local JSONL trace comparator works and is covered by tests.
-- The timing analyzer works on normalized timing samples and synthetic fixtures.
-- The repository does **not** yet claim end-to-end Ibex correctness or physical timing verification.
-- The Ibex text-trace adapter, waveform signal extractor, reference ISA oracle, test generation, and failure minimization are roadmap items.
+- The architectural JSONL comparator works and is covered by tests.
+- The timing analyzer works on normalized timing samples.
+- The official Ibex text-trace adapter is tested against a pinned example from lowRISC documentation.
+- The repository does **not** yet claim an end-to-end Verilator run, complete Ibex correctness checking, or physical timing verification.
+- Waveform signal extraction, a reference ISA oracle, generated programs, and failure minimization remain roadmap items.
 - No benchmark, coverage, or bug-finding performance claim is made.
 
 ## Quick start
@@ -38,22 +38,24 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
 
+# Parse an official-format Ibex instruction trace
+ibex-av parse-ibex-trace \
+  --input tests/fixtures/ibex_tracer/official_sample_022f0840.log \
+  --output artifacts/ibex-architectural.jsonl \
+  --metadata-output artifacts/ibex-metadata.jsonl \
+  --timing-output artifacts/ibex-timing.jsonl \
+  --report artifacts/ibex-parser-report.json
+
+# Analyze cycle gaps derived from the Ibex trace
+ibex-av analyze-timing \
+  --input artifacts/ibex-timing.jsonl \
+  --report artifacts/ibex-timing-report.json
+
 # Passing functional comparison
 ibex-av compare \
   --expected examples/traces/expected.jsonl \
   --actual examples/traces/actual_pass.jsonl \
   --report artifacts/pass-report.json
-
-# Deliberate functional mismatch: exits with code 1
-ibex-av compare \
-  --expected examples/traces/expected.jsonl \
-  --actual examples/traces/actual_fail.jsonl \
-  --report artifacts/fail-report.json
-
-# Synthetic memory-wait timing anomaly: exits with code 1
-ibex-av analyze-timing \
-  --input examples/timing/memory_wait.jsonl \
-  --report artifacts/timing-report.json
 ```
 
 Or run:
@@ -63,11 +65,28 @@ make test
 make demo
 ```
 
+## Official Ibex trace adapter
+
+The lowRISC tracer emits simulation time, cycle, PC, machine instruction, decoded instruction, register accesses, and memory values. The adapter converts that text into three reviewable streams:
+
+```text
+trace_core_00000000.log
+        ├── architectural.jsonl  -> functional comparator
+        ├── metadata.jsonl       -> cycles, width, disassembly, reads
+        └── timing.jsonl         -> cycle-gap analyzer
+```
+
+The parser also reports the SHA-256 of the raw input so generated evidence can be tied back to the exact source log.
+
+A text trace can show that instructions retired three cycles apart. It cannot necessarily prove why. A memory instruction plus a cycle gap is therefore marked as a memory association only; without explicit wait signals the timing analyzer returns `UNKNOWN`, not `MEMORY_WAIT`.
+
+See [Official Ibex Instruction Trace Adapter](docs/IBEX_TRACE_ADAPTER.md).
+
 ## Timing root cause analysis
 
-The analyzer receives the expected and actual cycle count plus explicit causal signals. It reports the cycle delta, a ranked primary cause, confidence score, and the exact evidence used.
+The analyzer receives the expected and actual cycle count plus explicit causal signals. It reports the cycle delta, a ranked primary cause, confidence score, and exact evidence used.
 
-Example result:
+Example with sufficient causal evidence:
 
 ```json
 {
@@ -86,7 +105,7 @@ Example result:
 }
 ```
 
-Supported initial candidates include memory wait, branch recovery, pipeline hazard, bus contention, interrupt service, long-latency execution, and clock-domain waiting. If the required signals are absent, the analyzer returns `UNKNOWN` rather than inventing a cause.
+Supported initial candidates include memory wait, branch recovery, pipeline hazard, bus contention, interrupt service, long-latency execution, and clock-domain waiting. If required signals are absent, the analyzer returns `UNKNOWN` rather than inventing a cause.
 
 Confidence is a deterministic rule score, **not** a statistical probability. See [Timing Root Cause Analysis](docs/TIMING_ANALYSIS.md).
 
@@ -94,26 +113,29 @@ Confidence is a deterministic rule score, **not** a statistical probability. See
 
 ```text
 .
-├── AGENTS.md                         # Guardrails for Codex/AI coding agents
+├── AGENTS.md
 ├── docs/
 │   ├── ARCHITECTURE.md
+│   ├── IBEX_TRACE_ADAPTER.md
 │   ├── ROADMAP.md
 │   ├── TIMING_ANALYSIS.md
 │   └── VERIFICATION_PROTOCOL.md
 ├── examples/
-│   ├── timing/                       # Cycle-level timing fixtures
-│   └── traces/                       # Architectural trace fixtures
+│   ├── timing/
+│   └── traces/
 ├── scripts/
-│   ├── bootstrap_ibex.sh             # Clone official lowRISC/ibex
-│   ├── build_ibex_simple_system.sh   # Run upstream FuseSoC build commands
+│   ├── bootstrap_ibex.sh
+│   ├── build_ibex_simple_system.sh
 │   └── run_fixture_demo.sh
 ├── src/ibex_agent_verification/
 │   ├── cli.py
 │   ├── comparator.py
+│   ├── ibex_trace.py
 │   ├── models.py
 │   ├── timing.py
 │   └── trace_io.py
 └── tests/
+    └── fixtures/ibex_tracer/
 ```
 
 ## Architectural trace contract
@@ -135,16 +157,16 @@ Hex strings and integers are accepted for numeric fields and normalized before c
 
 ## Ibex integration path
 
-The official Ibex Simple System contains an Ibex core, unified instruction/data memory, basic output and halt peripherals, a timer, and a software framework. Its documented Verilator flow produces `trace_core_00000000.log`.
+The official Ibex Simple System can run bare-metal programs in a Verilator simulation and produce `trace_core_00000000.log`.
 
 ```bash
 ./scripts/bootstrap_ibex.sh
 ./scripts/build_ibex_simple_system.sh
 ```
 
-The build script validates prerequisites and then follows the upstream commands. It does not hide missing toolchain setup or silently substitute a fake simulator.
+The build script validates prerequisites and follows upstream commands. It does not hide missing toolchain setup or silently substitute a fake simulator.
 
-The next integration layer must preserve the raw instruction trace and waveform evidence, extract normalized architectural and cycle-level events, and record the exact Ibex revision, configuration, simulator, and compiler versions.
+The current parser closes the text-format boundary. The next integration layer must execute a pinned Ibex simulation, preserve the generated raw trace and tool manifest, and extract waveform or internal signals for stronger timing diagnosis.
 
 ## Verification principle
 
