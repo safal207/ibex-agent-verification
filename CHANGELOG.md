@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Confirmed the first successful hosted pinned Ibex Verilator E2E run.
+- Recorded the hosted run ID, artifact ID and digest, toolchain, DUT commit, trace statistics, and timing interpretation.
+- Independently rehashed all `32/32` manifest-listed artifact files with no mismatch.
+- Added support for the real hosted Ibex trace header spelling `Insn` in addition to the documentation spelling `Instr`.
+- Added regression coverage for the real hosted header and a memory-store trace row.
+- Explicitly enabled `Zicsr` when compiling upstream `hello_test` with current RISC-V GCC.
+- Improved E2E failure diagnostics and prevented active long-running E2E jobs from being cancelled by later pushes.
+- Added deterministic unit tests before the expensive hosted Verilator build.
+- Marked roadmap Phase 1B complete while preserving the distinction between observed cycle gaps and proven timing causes.
+
 ## 0.4.0 — 2026-06-24
 
 - Added a pinned Ibex Simple System build and Verilator execution workflow.
