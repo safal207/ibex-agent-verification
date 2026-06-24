@@ -64,9 +64,9 @@ jobs:
       - name: Verify action contract
         env:
           ALLOW_DECISION: ${{ steps.allow.outputs.decision }}
-          ALLOW_REASONS: ${{ steps.allow.outputs.reason-codes }}
+          ALLOW_REASONS: ${{ steps.allow.outputs.reason_codes }}
           BLOCK_DECISION: ${{ steps.block_observe.outputs.decision }}
-          BLOCK_REASONS: ${{ steps.block_observe.outputs.reason-codes }}
+          BLOCK_REASONS: ${{ steps.block_observe.outputs.reason_codes }}
           BLOCK_ENFORCE_OUTCOME: ${{ steps.block_enforce.outcome }}
         run: |
           [[ "$ALLOW_DECISION" == "ALLOW" ]]
