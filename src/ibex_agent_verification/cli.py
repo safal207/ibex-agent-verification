@@ -13,6 +13,7 @@ from .ibex_trace import (
     write_timing_jsonl,
 )
 from .models import TraceValidationError
+from .silicon_gate import GateInputError, evaluate_gate
 from .timing import analyze_timing, load_timing_jsonl
 from .trace_io import load_jsonl
 
@@ -22,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ibex-av",
         description=(
             "Parse official Ibex traces, compare architectural events, "
-            "and analyze timing anomalies."
+            "analyze timing anomalies, and gate silicon changes."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -62,6 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="baseline retirement gap used for timing output (default: 1)",
     )
     ibex_trace.add_argument("--report", help="optional parser summary JSON path")
+
+    silicon_gate = subparsers.add_parser(
+        "gate-silicon-change",
+        help="issue ALLOW, BLOCK, or ESCALATE from reproducible silicon evidence",
+    )
+    silicon_gate.add_argument(
+        "--request", required=True, help="silicon gate request JSON path"
+    )
+    silicon_gate.add_argument("--report", help="optional gate decision JSON path")
     return parser
 
 
@@ -110,9 +120,14 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
             exit_code = 0
+        elif args.command == "gate-silicon-change":
+            payload = evaluate_gate(args.request)
+            exit_code = {"ALLOW": 0, "BLOCK": 1, "ESCALATE": 3}[
+                payload["decision"]
+            ]
         else:
             return 2
-    except TraceValidationError as exc:
+    except (TraceValidationError, GateInputError) as exc:
         payload = {"status": "INVALID_INPUT", "error": str(exc)}
         print(json.dumps(payload, indent=2), file=sys.stderr)
         return 2
