@@ -1,69 +1,49 @@
-name: PythiaLabs Silicon Evidence Gate
-description: Produce ALLOW, BLOCK, or ESCALATE from commit-bound silicon verification evidence.
-author: PythiaLabs
+name: "PythiaLabs Silicon Evidence Gate"
+description: "Produce ALLOW, BLOCK, or ESCALATE from commit-bound silicon verification evidence."
+author: "PythiaLabs"
 
 branding:
-  icon: shield
-  color: purple
+  icon: "shield"
+  color: "purple"
 
 inputs:
   request:
-    description: Path to the silicon gate request JSON in the caller workspace.
+    description: "Path to the silicon gate request JSON in the caller workspace."
     required: true
   report:
-    description: Path where the machine-readable gate decision will be written.
+    description: "Path where the machine-readable gate decision will be written."
     required: false
-    default: artifacts/silicon-gate-decision.json
+    default: "artifacts/silicon-gate-decision.json"
   fail_on_block:
-    description: Fail the action when the gate decision is BLOCK.
+    description: "Fail the action when the gate decision is BLOCK."
     required: false
     default: "true"
   fail_on_escalate:
-    description: Fail the action when the gate decision is ESCALATE.
+    description: "Fail the action when the gate decision is ESCALATE."
     required: false
     default: "true"
 
 outputs:
   decision:
-    description: Final gate decision: ALLOW, BLOCK, or ESCALATE.
+    description: "Final gate decision: ALLOW, BLOCK, or ESCALATE."
     value: ${{ steps.gate.outputs.decision }}
   reason_codes:
-    description: Comma-separated deterministic reason codes.
+    description: "Comma-separated deterministic reason codes."
     value: ${{ steps.gate.outputs.reason_codes }}
   request_sha256:
-    description: SHA-256 of the gate request JSON.
+    description: "SHA-256 of the gate request JSON."
     value: ${{ steps.gate.outputs.request_sha256 }}
   report_sha256:
-    description: SHA-256 of the generated gate decision JSON.
+    description: "SHA-256 of the generated gate decision JSON."
     value: ${{ steps.gate.outputs.report_sha256 }}
   report_path:
-    description: Path to the generated gate decision JSON.
+    description: "Path to the generated gate decision JSON."
     value: ${{ steps.gate.outputs.report_path }}
 
 runs:
-  using: composite
+  using: "composite"
   steps:
-    - name: Prepare action context
-      shell: bash
-      env:
-        SILICON_GATE_ACTION_PATH: ${{ github.action_path }}
-        SILICON_GATE_REQUEST: ${{ inputs.request }}
-        SILICON_GATE_REPORT: ${{ inputs.report }}
-      run: |
-        cd "$GITHUB_WORKSPACE"
-        mkdir -p "$(dirname "$SILICON_GATE_REPORT")"
-        {
-          echo "workspace=$GITHUB_WORKSPACE"
-          echo "action_path=$SILICON_GATE_ACTION_PATH"
-          echo "request=$SILICON_GATE_REQUEST"
-          echo "report=$SILICON_GATE_REPORT"
-          printf 'python3=' && command -v python3
-          python3 --version
-          [[ -f "$SILICON_GATE_REQUEST" ]] && echo "request_present=true" || echo "request_present=false"
-          [[ -f "$SILICON_GATE_ACTION_PATH/src/ibex_agent_verification/github_action.py" ]] && echo "module_present=true" || echo "module_present=false"
-        } >"${SILICON_GATE_REPORT}.context"
-
-    - name: Evaluate evidence
+    - name: "Evaluate evidence"
       id: gate
       shell: bash
       env:
@@ -72,18 +52,12 @@ runs:
         SILICON_GATE_REPORT: ${{ inputs.report }}
       run: |
         cd "$GITHUB_WORKSPACE"
-        set +e
         PYTHONPATH="${SILICON_GATE_ACTION_PATH}/src" \
           python3 -m ibex_agent_verification.github_action \
           --request "$SILICON_GATE_REQUEST" \
-          --report "$SILICON_GATE_REPORT" \
-          > >(tee "${SILICON_GATE_REPORT}.stdout") \
-          2> >(tee "${SILICON_GATE_REPORT}.stderr" >&2)
-        status=$?
-        set -e
-        exit "$status"
+          --report "$SILICON_GATE_REPORT"
 
-    - name: Enforce decision policy
+    - name: "Enforce decision policy"
       shell: bash
       env:
         SILICON_GATE_DECISION: ${{ steps.gate.outputs.decision }}
