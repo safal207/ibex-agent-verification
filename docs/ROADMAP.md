@@ -29,43 +29,33 @@
 
 ## Phase 1B — reproducible Ibex simulator run ✅
 
-The first successful hosted GitHub Actions run completed on 2026-06-24. Its
-run identifiers, artifact digest, manifest, trace counts, toolchain, and timing
-interpretation are recorded in
-[Hosted Ibex Verilator E2E Evidence](HOSTED_E2E_EVIDENCE_2026-06-24.md).
-
 - ✅ pin an explicit Ibex revision and configuration
-- ✅ install and record Verilator, FuseSoC, RISC-V GCC, Make, Git, Python, and pip versions
-- ✅ build Ibex Simple System under Verilator
-- ✅ compile upstream `hello_test.elf`
-- ✅ validate the real program output
-- ✅ retain raw trace, counters, stdout, stderr, commands, versions, configuration, ELF, and hashes
-- ✅ feed the generated trace into the Phase 1A adapter
-- ✅ create a versioned evidence manifest with SHA-256 per file
-- ✅ upload complete or partial evidence from GitHub Actions
-- ✅ confirm a successful hosted run and independently rehash all manifest-listed files
+- ✅ build Ibex Simple System and upstream `hello_test` under Verilator
+- ✅ validate real program output
+- ✅ preserve raw trace, counters, stdout, stderr, commands, versions, configuration, ELF, and hashes
+- ✅ generate normalized evidence and a SHA-256 manifest
+- ✅ confirm hosted runs and independently rehash manifest-listed files
+
+See [Hosted Ibex Verilator E2E Evidence](HOSTED_E2E_EVIDENCE_2026-06-24.md).
 
 ## Phase 1C — causal timing signal adapter 🧪
 
-The initial hosted causal slice completed successfully on 2026-06-24. It aligned
-all `1204/1204` text-trace retirements with `rvfi_valid`, preserved the raw FST,
-and reduced unexplained delayed observations from `880` to `489`. See
-[Hosted Causal Waveform E2E Evidence](HOSTED_CAUSAL_E2E_EVIDENCE_2026-06-24.md).
+Hosted run #30 aligned all `1204/1204` retirements, preserved the same pinned raw evidence, and classified delayed observations as `385 MEMORY_WAIT`, `248 INSTRUCTION_FETCH_WAIT`, `6 INTERRUPT_SERVICE`, and `241 UNKNOWN`.
 
-- ✅ define a strict pinned hierarchy contract for clock, RVFI, instruction, and data handshakes
-- ✅ add streaming VCD parsing with fail-closed required-signal resolution
-- ✅ align waveform rising edges with text-trace retirement timestamps
-- ✅ infer and record a constant trace-to-waveform timestamp offset
-- ✅ restore equivalent aliases when Verilator emits one VCD identifier for multiple nets
-- ✅ derive data wait, grant wait, instruction wait, interrupt, and trap observations
-- ✅ preserve raw FST plus normalized causal timing JSONL and report
-- ✅ confirm the first hosted waveform run and independently rehash all manifest-listed files
-- ✅ add dedicated `INSTRUCTION_FETCH_WAIT` scoring that requires an explicit wait counter
-- 🧪 confirm the instruction-fetch classification counts in a hosted E2E run
-- ⏳ add branch redirect, flush, pipeline hazard, and execution-unit signals
-- ⏳ add compact pinned real-waveform regression slices
+- ✅ strict pinned hierarchy contract for clock, RVFI, instruction, and data handshakes
+- ✅ streaming VCD parsing with fail-closed signal resolution
+- ✅ waveform/trace timestamp alignment and recorded offset
+- ✅ equivalent aliases for shared Verilator VCD identifiers
+- ✅ data wait, grant wait, instruction wait, interrupt, and trap observations
+- ✅ raw FST plus normalized causal JSONL and reports
+- ✅ hosted artifact integrity verification
+- ✅ dedicated `INSTRUCTION_FETCH_WAIT` scoring requiring an explicit wait counter
+- ✅ hosted confirmation: `248` fetch waits promoted from `UNKNOWN`
+- ⏳ branch redirect and pipeline flush signals
+- ⏳ true pipeline-hazard and execution-unit signals
+- ⏳ compact pinned real-waveform regression slices
 
-See [Causal Waveform Adapter](CAUSAL_WAVEFORM_ADAPTER.md).
+See [Causal Waveform Adapter](CAUSAL_WAVEFORM_ADAPTER.md) and [Hosted Causal Waveform E2E Evidence](HOSTED_CAUSAL_E2E_EVIDENCE_2026-06-24.md).
 
 ## Phase 2 — reference ISA oracle
 
