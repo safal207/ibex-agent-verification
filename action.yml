@@ -14,11 +14,11 @@ inputs:
     description: Path where the machine-readable gate decision will be written.
     required: false
     default: artifacts/silicon-gate-decision.json
-  fail-on-block:
+  fail_on_block:
     description: Fail the action when the gate decision is BLOCK.
     required: false
     default: "true"
-  fail-on-escalate:
+  fail_on_escalate:
     description: Fail the action when the gate decision is ESCALATE.
     required: false
     default: "true"
@@ -59,8 +59,8 @@ runs:
       shell: bash
       env:
         SILICON_GATE_DECISION: ${{ steps.gate.outputs.decision }}
-        FAIL_ON_BLOCK: ${{ inputs.fail-on-block }}
-        FAIL_ON_ESCALATE: ${{ inputs.fail-on-escalate }}
+        FAIL_ON_BLOCK: ${{ inputs.fail_on_block }}
+        FAIL_ON_ESCALATE: ${{ inputs.fail_on_escalate }}
       run: |
         case "$SILICON_GATE_DECISION" in
           ALLOW)
