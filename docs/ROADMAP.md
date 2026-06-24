@@ -47,15 +47,22 @@ interpretation are recorded in
 
 ## Phase 1C — causal timing signal adapter 🧪
 
+The initial hosted causal slice completed successfully on 2026-06-24. It aligned
+all `1204/1204` text-trace retirements with `rvfi_valid`, preserved the raw FST,
+and reduced unexplained delayed observations from `880` to `489`. See
+[Hosted Causal Waveform E2E Evidence](HOSTED_CAUSAL_E2E_EVIDENCE_2026-06-24.md).
+
 - ✅ define a strict pinned hierarchy contract for clock, RVFI, instruction, and data handshakes
 - ✅ add streaming VCD parsing with fail-closed required-signal resolution
 - ✅ align waveform rising edges with text-trace retirement timestamps
+- ✅ infer and record a constant trace-to-waveform timestamp offset
+- ✅ restore equivalent aliases when Verilator emits one VCD identifier for multiple nets
 - ✅ derive data wait, grant wait, instruction wait, interrupt, and trap observations
 - ✅ preserve raw FST plus normalized causal timing JSONL and report
-- 🧪 confirm the first hosted waveform run and inspect its manifest
+- ✅ confirm the first hosted waveform run and independently rehash all manifest-listed files
 - ⏳ add dedicated instruction-fetch cause scoring
 - ⏳ add branch redirect, flush, pipeline hazard, and execution-unit signals
-- ⏳ add pinned real-waveform regression fixtures or compact waveform slices
+- ⏳ add compact pinned real-waveform regression slices
 
 See [Causal Waveform Adapter](CAUSAL_WAVEFORM_ADAPTER.md).
 
