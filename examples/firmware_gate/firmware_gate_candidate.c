@@ -19,6 +19,12 @@ int main(int argc, char **argv) {
     sum += kMemoryValue;
   }
 
+  uint32_t read_sink = 0;
+  for (uint32_t index = 0; index < 1024; ++index) {
+    read_sink ^= kMemoryValue;
+  }
+  asm volatile("" : : "r"(read_sink) : "memory");
+
   pcount_enable(0);
 
   puts("Firmware gate result\n");
