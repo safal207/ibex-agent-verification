@@ -51,7 +51,7 @@ jobs:
         with:
           request: artifacts/action-smoke/block/gate-request.json
           report: artifacts/action-smoke/block/action-observe-decision.json
-          fail-on-block: "false"
+          fail_on_block: "false"
 
       - name: Enforce BLOCK
         id: block_enforce
