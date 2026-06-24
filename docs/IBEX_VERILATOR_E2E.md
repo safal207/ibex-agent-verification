@@ -31,16 +31,21 @@ Workflow:
 .github/workflows/ibex-e2e.yml
 ```
 
-It runs on Ubuntu 24.04, installs Verilator and a bare-metal RISC-V compiler,
-then executes:
+It runs on Ubuntu 24.04, runs deterministic unit tests, installs Verilator and a
+bare-metal RISC-V compiler, then executes:
 
 ```bash
-./scripts/run_ibex_e2e.sh
+bash ./scripts/run_ibex_e2e.sh
 ```
 
 The workflow can be started manually and also runs when E2E-related files change.
 It uploads `artifacts/ibex-e2e/` even after a failed step when partial evidence is
 available.
+
+The first successful hosted run completed on 2026-06-24. See
+[Hosted Ibex Verilator E2E Evidence](HOSTED_E2E_EVIDENCE_2026-06-24.md) for the
+run ID, artifact digest, pinned revisions, tool versions, trace statistics,
+manifest integrity verification, and timing interpretation.
 
 ## Local prerequisites
 
@@ -52,10 +57,11 @@ available.
 - srecord
 - a bare-metal RISC-V GCC toolchain
 
-The upstream software Makefile expects `riscv32-unknown-elf-*`. If only a
-`riscv64-unknown-elf-*` toolchain is installed, the runner creates temporary
-local aliases and still passes the explicit RV32 architecture and ABI flags
-used by upstream Ibex.
+The runner accepts either a `riscv32-unknown-elf-*` or
+`riscv64-unknown-elf-*` toolchain and invokes the selected compiler, `objcopy`,
+and `objdump` directly. The upstream `hello_test` build is given
+`ARCH=rv32imc_zicsr` so modern assemblers accept the CSR instructions used by
+`simple_system_common.c` while still producing RV32 ILP32 code.
 
 ## Successful-run contract
 
@@ -124,6 +130,11 @@ Therefore:
   causal signals;
 - Phase 1C must add waveform or simulator-internal evidence before stronger
   root-cause claims are allowed.
+
+The first hosted run evaluated `1203` adjacent retirement gaps against a simple
+one-cycle baseline. It reported `880` delay observations; all `880` remained
+`UNKNOWN` with confidence `0.0`. These are evidence-preserving observations,
+not defect claims.
 
 ## Failure handling
 

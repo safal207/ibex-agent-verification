@@ -19,7 +19,7 @@
 
 ## Phase 1A — official Ibex text-trace adapter ✅
 
-- parse documented `trace_core_<HARTID>.log` format
+- parse documented and real hosted `trace_core_<HARTID>.log` headers
 - preserve raw-input SHA-256
 - extract simulation time, cycle, PC, instruction, disassembly, registers, and memory evidence
 - preserve compressed versus uncompressed instruction width in metadata
@@ -27,9 +27,12 @@
 - fail with source-line context on unsupported input
 - fixture tests pinned to lowRISC/ibex commit `022f084096baed0a9b5ebdf697ed2965f13e8ed8`
 
-## Phase 1B — reproducible Ibex simulator run 🧪
+## Phase 1B — reproducible Ibex simulator run ✅
 
-Implementation is present; a successful hosted GitHub Actions run is still required before this phase is marked complete.
+The first successful hosted GitHub Actions run completed on 2026-06-24. Its
+run identifiers, artifact digest, manifest, trace counts, toolchain, and timing
+interpretation are recorded in
+[Hosted Ibex Verilator E2E Evidence](HOSTED_E2E_EVIDENCE_2026-06-24.md).
 
 - ✅ pin an explicit Ibex revision and configuration
 - ✅ install and record Verilator, FuseSoC, RISC-V GCC, Make, Git, Python, and pip versions
@@ -40,7 +43,7 @@ Implementation is present; a successful hosted GitHub Actions run is still requi
 - ✅ feed the generated trace into the Phase 1A adapter
 - ✅ create a versioned evidence manifest with SHA-256 per file
 - ✅ upload complete or partial evidence from GitHub Actions
-- ⏳ confirm the first successful hosted run and inspect its artifact
+- ✅ confirm a successful hosted run and independently rehash all manifest-listed files
 
 ## Phase 1C — causal timing signal adapter
 

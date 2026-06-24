@@ -11,7 +11,7 @@
 
 Hardware verification produces large traces, failing programs, waveforms, logs, and configuration details. AI coding agents can help generate tests and reduce failures, but only if the evidence path stays deterministic and reviewable.
 
-This repository currently provides four narrow capabilities:
+This repository currently provides six narrow capabilities:
 
 1. run a pinned Ibex Simple System experiment under Verilator;
 2. parse the official human-readable Ibex instruction trace into normalized evidence;
@@ -26,9 +26,9 @@ This is an **early, honest prototype**.
 
 - The architectural JSONL comparator works and is covered by tests.
 - The timing analyzer works on normalized timing samples.
-- The official Ibex text-trace adapter is tested against a pinned example from lowRISC documentation.
-- A pinned Verilator E2E workflow now builds and runs upstream `hello_test` and preserves raw and normalized evidence.
-- The first successful hosted E2E run must still be confirmed by GitHub Actions; adding the workflow is not itself proof that the external toolchain completed.
+- The official Ibex text-trace adapter is tested against a pinned example from lowRISC documentation and a real hosted Verilator trace.
+- A pinned Verilator E2E workflow builds and runs upstream `hello_test` and preserves raw and normalized evidence.
+- The first successful hosted E2E run completed on 2026-06-24; its manifest, artifact digest, trace counts, and integrity verification are recorded in [Hosted Ibex Verilator E2E Evidence](docs/HOSTED_E2E_EVIDENCE_2026-06-24.md).
 - Waveform signal extraction, a reference ISA oracle, generated programs, and failure minimization remain roadmap items.
 - No benchmark, coverage, silicon-signoff, or bug-finding performance claim is made.
 
@@ -102,7 +102,9 @@ Default device-under-test revision:
 
 The GitHub Actions job uploads `artifacts/ibex-e2e/` even when a later step fails, so build or simulator failures remain inspectable. A successful bundle requires a real simulator exit, the expected `Hello simple system` output, a non-empty instruction trace, parser success, and a completed manifest.
 
-See [Pinned Ibex Verilator E2E Run](docs/IBEX_VERILATOR_E2E.md).
+The first confirmed hosted run parsed `1204` instructions, preserved `32` manifest-listed files with verified SHA-256 values, and correctly reported timing deviations as `UNKNOWN` when causal signals were absent.
+
+See [Pinned Ibex Verilator E2E Run](docs/IBEX_VERILATOR_E2E.md) and [Hosted Ibex Verilator E2E Evidence](docs/HOSTED_E2E_EVIDENCE_2026-06-24.md).
 
 ## Official Ibex trace adapter
 
@@ -158,6 +160,7 @@ Confidence is a deterministic rule score, **not** a statistical probability. See
 ├── AGENTS.md
 ├── docs/
 │   ├── ARCHITECTURE.md
+│   ├── HOSTED_E2E_EVIDENCE_2026-06-24.md
 │   ├── IBEX_TRACE_ADAPTER.md
 │   ├── IBEX_VERILATOR_E2E.md
 │   ├── ROADMAP.md
