@@ -1,0 +1,89 @@
+name: Real RTL Silicon Gate Demo
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/real-rtl-gate-demo.yml"
+      - "scripts/run_real_rtl_gate_demo.sh"
+      - "examples/rtl_gate/**"
+      - "examples/firmware_gate/firmware_gate_baseline.c"
+      - "src/ibex_agent_verification/**"
+      - "docs/REAL_RTL_GATE_DEMO.md"
+      - "pyproject.toml"
+  pull_request:
+    paths:
+      - ".github/workflows/real-rtl-gate-demo.yml"
+      - "scripts/run_real_rtl_gate_demo.sh"
+      - "examples/rtl_gate/**"
+      - "examples/firmware_gate/firmware_gate_baseline.c"
+      - "src/ibex_agent_verification/**"
+      - "docs/REAL_RTL_GATE_DEMO.md"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-rtl-gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  real-rtl-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      IBEX_REF: 022f084096baed0a9b5ebdf697ed2965f13e8ed8
+      IBEX_CONFIG: small
+      EVIDENCE_DIR: artifacts/real-rtl-gate-demo
+      ARCH: rv32imc_zicsr
+
+    steps:
+      - name: Check out verification project
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install verification project
+        run: python -m pip install -e .
+
+      - name: Run deterministic unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils-riscv64-unknown-elf \
+            build-essential \
+            gcc-riscv64-unknown-elf \
+            gtkwave \
+            libelf-dev \
+            srecord \
+            verilator
+
+      - name: Run real baseline and candidate RTL gate
+        run: bash scripts/run_real_rtl_gate_demo.sh
+
+      - name: Show real RTL gate summary
+        if: always()
+        run: |
+          if [[ -f artifacts/real-rtl-gate-demo/demo-summary.json ]]; then
+            python -m json.tool artifacts/real-rtl-gate-demo/demo-summary.json
+          else
+            echo "No final summary was produced; inspect partial evidence and logs."
+          fi
+
+      - name: Upload real RTL evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-rtl-silicon-gate-${{ github.sha }}
+          path: artifacts/real-rtl-gate-demo/
+          if-no-files-found: warn
+          retention-days: 14
