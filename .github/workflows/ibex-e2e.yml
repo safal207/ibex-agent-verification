@@ -45,6 +45,12 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Install verification project
+        run: python -m pip install -e .
+
+      - name: Run deterministic unit tests
+        run: python -m unittest discover -s tests -v
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -55,9 +61,6 @@ jobs:
             libelf-dev \
             srecord \
             verilator
-
-      - name: Install verification project
-        run: python -m pip install -e .
 
       - name: Run pinned Ibex simulation and build evidence
         run: bash ./scripts/run_ibex_e2e.sh
