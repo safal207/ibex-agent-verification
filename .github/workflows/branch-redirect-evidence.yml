@@ -1,0 +1,66 @@
+name: Ibex Branch Redirect Evidence
+
+on:
+  workflow_run:
+    workflows: ["Ibex Verilator E2E"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ibex-branch-redirect-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  analyze-branch-redirects:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out exact verified revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install verification project
+        run: python -m pip install -e .
+
+      - name: Download successful Verilator evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ibex-verilator-evidence-*
+          path: artifacts/ibex-e2e
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Extract branch redirect evidence
+        run: |
+          python -m ibex_agent_verification.control_flow \
+            --input artifacts/ibex-e2e/raw/trace_core_00000000.log \
+            --output artifacts/ibex-e2e/normalized/branch-redirects.jsonl \
+            --report artifacts/ibex-e2e/normalized/branch-redirect-report.json
+
+      - name: Show branch redirect summary
+        run: |
+          python -m json.tool \
+            artifacts/ibex-e2e/normalized/branch-redirect-report.json
+
+      - name: Upload derived evidence bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ibex-branch-redirect-evidence-${{ github.event.workflow_run.head_sha }}
+          path: artifacts/ibex-e2e/
+          if-no-files-found: error
+          retention-days: 14
