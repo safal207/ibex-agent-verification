@@ -23,7 +23,7 @@ permissions:
 
 concurrency:
   group: ibex-e2e-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verilator-e2e:
@@ -58,6 +58,7 @@ jobs:
             binutils-riscv64-unknown-elf \
             build-essential \
             gcc-riscv64-unknown-elf \
+            gtkwave \
             libelf-dev \
             srecord \
             verilator
