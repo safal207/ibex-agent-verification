@@ -8,13 +8,13 @@ Use this repository as a composite GitHub Action to evaluate a commit-bound gate
 steps:
   - uses: actions/checkout@v4
   - id: silicon_gate
-    uses: safal207/ibex-agent-verification@main
+    uses: safal207/ibex-agent-verification@v0.7.0
     with:
       request: artifacts/gate/gate-request.json
       report: artifacts/gate/gate-decision.json
 ```
 
-Pin a reviewed commit SHA or immutable release tag in production. The action runs its stdlib-only Python code directly from the reviewed action source and currently targets Linux runners with `python3` available.
+Pin an immutable release tag or its reviewed commit SHA in production. The action runs its stdlib-only Python code directly from the reviewed action source and currently targets Linux runners with `python3` available.
 
 ## Inputs
 
@@ -39,7 +39,7 @@ Pin a reviewed commit SHA or immutable release tag in production. The action run
 
 ```yaml
 - id: silicon_gate
-  uses: safal207/ibex-agent-verification@main
+  uses: safal207/ibex-agent-verification@v0.7.0
   with:
     request: artifacts/gate/gate-request.json
     fail_on_block: "false"
