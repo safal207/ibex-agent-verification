@@ -14,7 +14,7 @@ steps:
       report: artifacts/gate/gate-decision.json
 ```
 
-Pin a reviewed commit SHA or immutable release tag in production.
+Pin a reviewed commit SHA or immutable release tag in production. The action runs its stdlib-only Python code directly from the reviewed action source and currently targets Linux runners with `python3` available.
 
 ## Inputs
 
@@ -22,7 +22,6 @@ Pin a reviewed commit SHA or immutable release tag in production.
 |---|---|---|
 | `request` | required | Gate request JSON path. |
 | `report` | `artifacts/silicon-gate-decision.json` | Generated decision JSON path. |
-| `python-version` | `3.12` | Python used by the action. |
 | `fail-on-block` | `true` | Fail when the decision is `BLOCK`. |
 | `fail-on-escalate` | `true` | Fail when the decision is `ESCALATE`. |
 
