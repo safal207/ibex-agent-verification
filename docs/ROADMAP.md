@@ -45,12 +45,19 @@ interpretation are recorded in
 - ✅ upload complete or partial evidence from GitHub Actions
 - ✅ confirm a successful hosted run and independently rehash all manifest-listed files
 
-## Phase 1C — causal timing signal adapter
+## Phase 1C — causal timing signal adapter 🧪
 
-- extract cycle boundaries and supported causal signals from waveform or simulator instrumentation
-- map real Ibex signals into normalized timing samples
-- distinguish observation (`memory_access`) from causal proof (`memory_wait_cycles`, `data_ready=false`)
-- add pinned waveform fixtures and deterministic extraction tests
+- ✅ define a strict pinned hierarchy contract for clock, RVFI, instruction, and data handshakes
+- ✅ add streaming VCD parsing with fail-closed required-signal resolution
+- ✅ align waveform rising edges with text-trace retirement timestamps
+- ✅ derive data wait, grant wait, instruction wait, interrupt, and trap observations
+- ✅ preserve raw FST plus normalized causal timing JSONL and report
+- 🧪 confirm the first hosted waveform run and inspect its manifest
+- ⏳ add dedicated instruction-fetch cause scoring
+- ⏳ add branch redirect, flush, pipeline hazard, and execution-unit signals
+- ⏳ add pinned real-waveform regression fixtures or compact waveform slices
+
+See [Causal Waveform Adapter](CAUSAL_WAVEFORM_ADAPTER.md).
 
 ## Phase 2 — reference ISA oracle
 
