@@ -14,10 +14,6 @@ inputs:
     description: Path where the machine-readable gate decision will be written.
     required: false
     default: artifacts/silicon-gate-decision.json
-  python-version:
-    description: Python version used to install and run the gate.
-    required: false
-    default: "3.12"
   fail-on-block:
     description: Fail the action when the gate decision is BLOCK.
     required: false
@@ -47,16 +43,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ inputs.python-version }}
-        cache: pip
-
-    - name: Install Silicon Evidence Gate
-      shell: bash
-      run: python -m pip install "${GITHUB_ACTION_PATH}"
-
     - name: Evaluate evidence
       id: gate
       shell: bash
@@ -64,7 +50,8 @@ runs:
         SILICON_GATE_REQUEST: ${{ inputs.request }}
         SILICON_GATE_REPORT: ${{ inputs.report }}
       run: |
-        python -m ibex_agent_verification.github_action \
+        PYTHONPATH="${GITHUB_ACTION_PATH}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+          python3 -m ibex_agent_verification.github_action \
           --request "$SILICON_GATE_REQUEST" \
           --report "$SILICON_GATE_REPORT"
 
