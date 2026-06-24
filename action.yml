@@ -31,16 +31,16 @@ outputs:
   decision:
     description: Final gate decision: ALLOW, BLOCK, or ESCALATE.
     value: ${{ steps.gate.outputs.decision }}
-  reason-codes:
+  reason_codes:
     description: Comma-separated deterministic reason codes.
     value: ${{ steps.gate.outputs.reason_codes }}
-  request-sha256:
+  request_sha256:
     description: SHA-256 of the gate request JSON.
     value: ${{ steps.gate.outputs.request_sha256 }}
-  report-sha256:
+  report_sha256:
     description: SHA-256 of the generated gate decision JSON.
     value: ${{ steps.gate.outputs.report_sha256 }}
-  report-path:
+  report_path:
     description: Path to the generated gate decision JSON.
     value: ${{ steps.gate.outputs.report_path }}
 
