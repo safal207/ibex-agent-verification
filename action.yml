@@ -1,0 +1,87 @@
+name: "PythiaLabs Silicon Evidence Gate"
+description: "Produce ALLOW, BLOCK, or ESCALATE from commit-bound silicon verification evidence."
+author: "PythiaLabs"
+
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  request:
+    description: "Path to the silicon gate request JSON in the caller workspace."
+    required: true
+  report:
+    description: "Path where the machine-readable gate decision will be written."
+    required: false
+    default: "artifacts/silicon-gate-decision.json"
+  fail_on_block:
+    description: "Fail the action when the gate decision is BLOCK."
+    required: false
+    default: "true"
+  fail_on_escalate:
+    description: "Fail the action when the gate decision is ESCALATE."
+    required: false
+    default: "true"
+
+outputs:
+  decision:
+    description: "Final gate decision: ALLOW, BLOCK, or ESCALATE."
+    value: ${{ steps.gate.outputs.decision }}
+  reason_codes:
+    description: "Comma-separated deterministic reason codes."
+    value: ${{ steps.gate.outputs.reason_codes }}
+  request_sha256:
+    description: "SHA-256 of the gate request JSON."
+    value: ${{ steps.gate.outputs.request_sha256 }}
+  report_sha256:
+    description: "SHA-256 of the generated gate decision JSON."
+    value: ${{ steps.gate.outputs.report_sha256 }}
+  report_path:
+    description: "Path to the generated gate decision JSON."
+    value: ${{ steps.gate.outputs.report_path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: "Evaluate evidence"
+      id: gate
+      shell: bash
+      env:
+        SILICON_GATE_ACTION_PATH: ${{ github.action_path }}
+        SILICON_GATE_REQUEST: ${{ inputs.request }}
+        SILICON_GATE_REPORT: ${{ inputs.report }}
+      run: |
+        cd "$GITHUB_WORKSPACE"
+        PYTHONPATH="${SILICON_GATE_ACTION_PATH}/src" \
+          python3 -m ibex_agent_verification.github_action \
+          --request "$SILICON_GATE_REQUEST" \
+          --report "$SILICON_GATE_REPORT"
+
+    - name: "Enforce decision policy"
+      shell: bash
+      env:
+        SILICON_GATE_DECISION: ${{ steps.gate.outputs.decision }}
+        FAIL_ON_BLOCK: ${{ inputs.fail_on_block }}
+        FAIL_ON_ESCALATE: ${{ inputs.fail_on_escalate }}
+      run: |
+        case "$SILICON_GATE_DECISION" in
+          ALLOW)
+            exit 0
+            ;;
+          BLOCK)
+            if [[ "$FAIL_ON_BLOCK" == "true" ]]; then
+              echo "Silicon Evidence Gate blocked this change." >&2
+              exit 1
+            fi
+            ;;
+          ESCALATE)
+            if [[ "$FAIL_ON_ESCALATE" == "true" ]]; then
+              echo "Silicon Evidence Gate requires human escalation." >&2
+              exit 3
+            fi
+            ;;
+          *)
+            echo "Unexpected Silicon Evidence Gate decision: $SILICON_GATE_DECISION" >&2
+            exit 2
+            ;;
+        esac
