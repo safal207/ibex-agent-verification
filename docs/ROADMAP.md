@@ -13,7 +13,7 @@
 - cycle-baseline deviation detection
 - deterministic evidence scoring
 - ranked cause candidates
-- memory, branch, pipeline, bus, interrupt, execution-unit, and clock-domain rules
+- memory, instruction-fetch, branch, pipeline, bus, interrupt, execution-unit, and clock-domain rules
 - explicit `UNKNOWN` result when evidence is insufficient
 - synthetic fixtures and CLI report
 
@@ -60,7 +60,8 @@ and reduced unexplained delayed observations from `880` to `489`. See
 - ✅ derive data wait, grant wait, instruction wait, interrupt, and trap observations
 - ✅ preserve raw FST plus normalized causal timing JSONL and report
 - ✅ confirm the first hosted waveform run and independently rehash all manifest-listed files
-- ⏳ add dedicated instruction-fetch cause scoring
+- ✅ add dedicated `INSTRUCTION_FETCH_WAIT` scoring that requires an explicit wait counter
+- 🧪 confirm the instruction-fetch classification counts in a hosted E2E run
 - ⏳ add branch redirect, flush, pipeline hazard, and execution-unit signals
 - ⏳ add compact pinned real-waveform regression slices
 
