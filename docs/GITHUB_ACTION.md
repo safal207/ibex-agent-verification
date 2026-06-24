@@ -22,8 +22,8 @@ Pin a reviewed commit SHA or immutable release tag in production. The action run
 |---|---|---|
 | `request` | required | Gate request JSON path. |
 | `report` | `artifacts/silicon-gate-decision.json` | Generated decision JSON path. |
-| `fail-on-block` | `true` | Fail when the decision is `BLOCK`. |
-| `fail-on-escalate` | `true` | Fail when the decision is `ESCALATE`. |
+| `fail_on_block` | `true` | Fail when the decision is `BLOCK`. |
+| `fail_on_escalate` | `true` | Fail when the decision is `ESCALATE`. |
 
 ## Outputs
 
@@ -42,8 +42,8 @@ Pin a reviewed commit SHA or immutable release tag in production. The action run
   uses: safal207/ibex-agent-verification@main
   with:
     request: artifacts/gate/gate-request.json
-    fail-on-block: "false"
-    fail-on-escalate: "false"
+    fail_on_block: "false"
+    fail_on_escalate: "false"
 ```
 
 The action still publishes the decision, reason codes, hashes, annotation, JSON report, and job summary.
@@ -52,8 +52,8 @@ The action still publishes the decision, reason codes, hashes, annotation, JSON 
 
 ```text
 ALLOW     -> success
-BLOCK     -> exit 1 when fail-on-block=true
-ESCALATE  -> exit 3 when fail-on-escalate=true
+BLOCK     -> exit 1 when fail_on_block=true
+ESCALATE  -> exit 3 when fail_on_escalate=true
 invalid   -> exit 2
 ```
 
