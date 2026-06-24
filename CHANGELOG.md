@@ -8,7 +8,10 @@
 - Added deterministic confidence scoring for response wait and grant wait evidence.
 - Preserved stronger memory and interrupt causes as primary while retaining instruction fetch wait as a ranked secondary candidate when both are observed.
 - Added regression coverage for response wait, grant wait, request-without-wait rejection, and mixed memory/fetch evidence.
-- Updated the timing-analysis contract and Phase 1C roadmap.
+- Confirmed hosted E2E run #30 with `1204/1204` aligned retirements and the same pinned waveform dimensions as run #23.
+- Reclassified exactly `248` previously unknown delayed observations as `INSTRUCTION_FETCH_WAIT`; `UNKNOWN` fell from `489` to `241` while memory, interrupt, on-time, and total counts remained unchanged.
+- Independently verified all `39/39` manifest-listed files by byte size and SHA-256.
+- Updated the timing-analysis contract, hosted evidence record, and Phase 1C roadmap.
 
 ## 0.5.0 — 2026-06-24
 
