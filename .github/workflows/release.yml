@@ -35,14 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="$(python3 - <<'PY'
-          import tomllib
-          from pathlib import Path
-
-          data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))
-          print(data['project']['version'])
-          PY
-          )"
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           tag="v${version}"
           notes="docs/releases/${tag}.md"
 
@@ -69,15 +62,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" > tag-ref.json 2>/dev/null; then
-            actual_sha="$(python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          data = json.loads(Path('tag-ref.json').read_text(encoding='utf-8'))
-          print(data['object']['sha'])
-          PY
-            )"
+          if actual_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha' 2>/dev/null)"; then
             [[ "$actual_sha" == "$EXPECTED_SHA" ]] || {
               echo "Existing tag $TAG points to $actual_sha, expected $EXPECTED_SHA; refusing to retarget." >&2
               exit 1
@@ -112,24 +97,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release view "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json tagName,isDraft,isPrerelease,url,targetCommitish \
-            > release.json
-          python3 - "$TAG" "$EXPECTED_SHA" <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-
-          tag, expected_sha = sys.argv[1:]
-          data = json.loads(Path('release.json').read_text(encoding='utf-8'))
-          if data['tagName'] != tag:
-              raise SystemExit(f"Unexpected tag: {data['tagName']}")
-          if data['isDraft'] or data['isPrerelease']:
-              raise SystemExit('Release must be published and stable')
-          if data['targetCommitish'] not in {expected_sha, 'main'}:
-              raise SystemExit(
-                  f"Unexpected targetCommitish: {data['targetCommitish']}"
-              )
-          print(json.dumps(data, indent=2, sort_keys=True))
-PY
+          [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName --jq '.tagName')" == "$TAG" ]]
+          [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" == "false" ]]
+          [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')" == "false" ]]
+          actual_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')"
+          [[ "$actual_sha" == "$EXPECTED_SHA" ]]
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,url,targetCommitish
