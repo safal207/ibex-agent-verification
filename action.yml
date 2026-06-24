@@ -43,6 +43,26 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Prepare action context
+      shell: bash
+      env:
+        SILICON_GATE_ACTION_PATH: ${{ github.action_path }}
+        SILICON_GATE_REQUEST: ${{ inputs.request }}
+        SILICON_GATE_REPORT: ${{ inputs.report }}
+      run: |
+        cd "$GITHUB_WORKSPACE"
+        mkdir -p "$(dirname "$SILICON_GATE_REPORT")"
+        {
+          echo "workspace=$GITHUB_WORKSPACE"
+          echo "action_path=$SILICON_GATE_ACTION_PATH"
+          echo "request=$SILICON_GATE_REQUEST"
+          echo "report=$SILICON_GATE_REPORT"
+          printf 'python3=' && command -v python3
+          python3 --version
+          [[ -f "$SILICON_GATE_REQUEST" ]] && echo "request_present=true" || echo "request_present=false"
+          [[ -f "$SILICON_GATE_ACTION_PATH/src/ibex_agent_verification/github_action.py" ]] && echo "module_present=true" || echo "module_present=false"
+        } >"${SILICON_GATE_REPORT}.context"
+
     - name: Evaluate evidence
       id: gate
       shell: bash
@@ -52,10 +72,16 @@ runs:
         SILICON_GATE_REPORT: ${{ inputs.report }}
       run: |
         cd "$GITHUB_WORKSPACE"
+        set +e
         PYTHONPATH="${SILICON_GATE_ACTION_PATH}/src" \
           python3 -m ibex_agent_verification.github_action \
           --request "$SILICON_GATE_REQUEST" \
-          --report "$SILICON_GATE_REPORT"
+          --report "$SILICON_GATE_REPORT" \
+          > >(tee "${SILICON_GATE_REPORT}.stdout") \
+          2> >(tee "${SILICON_GATE_REPORT}.stderr" >&2)
+        status=$?
+        set -e
+        exit "$status"
 
     - name: Enforce decision policy
       shell: bash
