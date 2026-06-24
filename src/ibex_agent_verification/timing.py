@@ -184,6 +184,30 @@ def _candidate_scores(sample: TimingSample) -> list[CauseCandidate]:
     if memory_score:
         scores.append(("MEMORY_WAIT", memory_score, memory_evidence))
 
+    fetch_wait = _positive_signal(signals, "instruction_wait_cycles")
+    fetch_grant_wait = _positive_signal(signals, "instruction_grant_wait_cycles")
+    if fetch_wait or fetch_grant_wait:
+        fetch_score = 0.0
+        fetch_evidence: list[str] = []
+        if fetch_wait:
+            fetch_score += 0.50
+            fetch_evidence.append(f"instruction_wait_cycles={fetch_wait}")
+        if fetch_grant_wait:
+            fetch_score += 0.50
+            fetch_evidence.append(
+                f"instruction_grant_wait_cycles={fetch_grant_wait}"
+            )
+        if _signal_bool(signals, "instr_req"):
+            fetch_score += 0.10
+            fetch_evidence.append("instr_req=true")
+        if signals.get("instr_ready") is False:
+            fetch_score += 0.15
+            fetch_evidence.append("instr_ready=false")
+        if signals.get("instr_grant") is False:
+            fetch_score += 0.15
+            fetch_evidence.append("instr_grant=false")
+        scores.append(("INSTRUCTION_FETCH_WAIT", fetch_score, fetch_evidence))
+
     branch_score = 0.0
     branch_evidence: list[str] = []
     if _signal_bool(signals, "branch_mispredict"):
