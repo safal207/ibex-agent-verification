@@ -47,10 +47,12 @@ runs:
       id: gate
       shell: bash
       env:
+        SILICON_GATE_ACTION_PATH: ${{ github.action_path }}
         SILICON_GATE_REQUEST: ${{ inputs.request }}
         SILICON_GATE_REPORT: ${{ inputs.report }}
       run: |
-        PYTHONPATH="${GITHUB_ACTION_PATH}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+        cd "$GITHUB_WORKSPACE"
+        PYTHONPATH="${SILICON_GATE_ACTION_PATH}/src" \
           python3 -m ibex_agent_verification.github_action \
           --request "$SILICON_GATE_REQUEST" \
           --report "$SILICON_GATE_REPORT"
