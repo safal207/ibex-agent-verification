@@ -215,10 +215,10 @@ run_logged parse-trace \
   --report "$NORMALIZED_DIR/parser-report.json"
 
 run_logged convert-waveform \
-  fst2vcd "$WAVEFORM_FST" "$WAVEFORM_VCD"
+  bash -c 'fst2vcd "$1" > "$2"' _ "$WAVEFORM_FST" "$WAVEFORM_VCD"
 
 run_logged enrich-causal-timing \
-  python3 -m ibex_agent_verification.causal_vcd \
+  python3 -m ibex_agent_verification.causal_hosted \
   --vcd "$WAVEFORM_VCD" \
   --metadata "$NORMALIZED_DIR/metadata.jsonl" \
   --timing "$NORMALIZED_DIR/timing.jsonl" \
