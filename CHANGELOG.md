@@ -1,16 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-06-24
 
-- Confirmed the first successful hosted pinned Ibex Verilator E2E run.
-- Recorded the hosted run ID, artifact ID and digest, toolchain, DUT commit, trace statistics, and timing interpretation.
-- Independently rehashed all `32/32` manifest-listed artifact files with no mismatch.
+- Confirmed the first successful hosted pinned Ibex Verilator E2E run and independently rehashed every manifest-listed file.
 - Added support for the real hosted Ibex trace header spelling `Insn` in addition to the documentation spelling `Instr`.
-- Added regression coverage for the real hosted header and a memory-store trace row.
+- Added regression coverage for real hosted trace headers and memory-store rows.
 - Explicitly enabled `Zicsr` when compiling upstream `hello_test` with current RISC-V GCC.
-- Improved E2E failure diagnostics and prevented active long-running E2E jobs from being cancelled by later pushes.
-- Added deterministic unit tests before the expensive hosted Verilator build.
-- Marked roadmap Phase 1B complete while preserving the distinction between observed cycle gaps and proven timing causes.
+- Improved E2E diagnostics and added fast deterministic tests before the expensive simulator build.
+- Added raw FST waveform capture to the pinned hosted Ibex experiment.
+- Added strict VCD signal resolution for clock, RVFI, instruction handshakes, data handshakes, and timer IRQ.
+- Added deterministic retirement-to-waveform offset inference with a 95% fail-closed alignment threshold.
+- Added support for equivalent signal aliases that Verilator emits under one VCD identifier.
+- Added causal timing enrichment for data response waits, bus grant waits, instruction response waits, interrupts, and traps.
+- Added `timing-causal.jsonl`, `causal-report.json`, and raw `sim.fst` to the evidence bundle and SHA-256 manifest.
+- Confirmed hosted causal run #23 with `1204/1204` aligned retirements and `39/39` independently verified manifest files.
+- Classified the one-cycle-baseline delayed observations as `385 MEMORY_WAIT`, `6 INTERRUPT_SERVICE`, and `489 UNKNOWN` without treating classifications as defect claims.
+- Made PR E2E runs cancel stale PR runs while preserving active `main` and manual runs.
+- Marked roadmap Phase 1B complete and recorded the first successful Phase 1C hosted slice.
 
 ## 0.4.0 — 2026-06-24
 
