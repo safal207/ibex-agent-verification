@@ -6,6 +6,7 @@ IBEX_REF="${IBEX_REF:-022f084096baed0a9b5ebdf697ed2965f13e8ed8}"
 IBEX_CONFIG="${IBEX_CONFIG:-small}"
 IBEX_DIR="${IBEX_DIR:-$PROJECT_ROOT/third_party/ibex}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-$PROJECT_ROOT/artifacts/ibex-e2e}"
+RISCV_ARCH="${ARCH:-rv32imc_zicsr}"
 
 if [[ "$IBEX_DIR" != /* ]]; then
   IBEX_DIR="$PROJECT_ROOT/$IBEX_DIR"
@@ -17,12 +18,15 @@ fi
 RAW_DIR="$EVIDENCE_DIR/raw"
 NORMALIZED_DIR="$EVIDENCE_DIR/normalized"
 LOG_DIR="$EVIDENCE_DIR/logs"
+WORK_DIR="$EVIDENCE_DIR/work"
 COMMANDS_FILE="$EVIDENCE_DIR/commands.sh"
 TOOL_VERSIONS_FILE="$EVIDENCE_DIR/tool-versions.txt"
+WAVEFORM_FST="$RAW_DIR/sim.fst"
+WAVEFORM_VCD="$WORK_DIR/sim.vcd"
 CURRENT_STAGE="initialization"
 
 rm -rf "$EVIDENCE_DIR"
-mkdir -p "$RAW_DIR" "$NORMALIZED_DIR" "$LOG_DIR"
+mkdir -p "$RAW_DIR" "$NORMALIZED_DIR" "$LOG_DIR" "$WORK_DIR"
 printf '#!/usr/bin/env bash\nset -euo pipefail\n\n' > "$COMMANDS_FILE"
 
 print_log_tail() {
@@ -93,7 +97,7 @@ first_line() {
 }
 
 CURRENT_STAGE="checking required commands"
-for command in git make python3 verilator; do
+for command in git make python3 verilator fst2vcd; do
   require_command "$command"
 done
 
@@ -113,9 +117,10 @@ require_command "$RISCV_OBJCOPY"
 require_command "$RISCV_OBJDUMP"
 
 CURRENT_STAGE="validating RV32 compiler support"
-COMPILER_PROBE="$EVIDENCE_DIR/rv32-toolchain-probe.o"
+COMPILER_PROBE="$WORK_DIR/rv32-toolchain-probe.o"
 printf 'int probe(void) { return 0; }\n' | \
-  "$RISCV_CC" -march=rv32imc -mabi=ilp32 -ffreestanding -x c -c -o "$COMPILER_PROBE" -
+  "$RISCV_CC" -march="$RISCV_ARCH" -mabi=ilp32 -ffreestanding -x c -c \
+  -o "$COMPILER_PROBE" -
 rm -f "$COMPILER_PROBE"
 
 CURRENT_STAGE="preparing Ibex checkout"
@@ -137,7 +142,9 @@ CURRENT_STAGE="recording tool versions"
   printf 'pip=%s\n' "$(first_line python3 -m pip --version)"
   printf 'fusesoc=%s\n' "$(first_line fusesoc --version)"
   printf 'verilator=%s\n' "$(first_line verilator --version)"
+  printf 'fst2vcd_path=%s\n' "$(command -v fst2vcd)"
   printf 'riscv_gcc=%s\n' "$(first_line "$RISCV_CC" --version)"
+  printf 'riscv_arch=%s\n' "$RISCV_ARCH"
   printf 'make=%s\n' "$(first_line make --version)"
   printf 'git=%s\n' "$(first_line git --version)"
 } > "$TOOL_VERSIONS_FILE"
@@ -153,7 +160,8 @@ run_logged build-hello \
   make -C examples/sw/simple_system/hello_test \
   "CC=$RISCV_CC" \
   "OBJCOPY=$RISCV_OBJCOPY" \
-  "OBJDUMP=$RISCV_OBJDUMP"
+  "OBJDUMP=$RISCV_OBJDUMP" \
+  "ARCH=$RISCV_ARCH"
 
 SIMULATOR="./build/lowrisc_ibex_ibex_simple_system_0/sim-verilator/Vibex_simple_system"
 HELLO_ELF="./examples/sw/simple_system/hello_test/hello_test.elf"
@@ -165,10 +173,10 @@ if [[ ! -f "$HELLO_ELF" ]]; then
   fail "Hello-test ELF was not produced: $HELLO_ELF"
 fi
 
-CURRENT_STAGE="running simulator"
-record_command "$SIMULATOR" "--meminit=ram,$HELLO_ELF"
+CURRENT_STAGE="running simulator with waveform tracing"
+record_command "$SIMULATOR" "--meminit=ram,$HELLO_ELF" "--trace=$WAVEFORM_FST"
 set +e
-"$SIMULATOR" "--meminit=ram,$HELLO_ELF" \
+"$SIMULATOR" "--meminit=ram,$HELLO_ELF" "--trace=$WAVEFORM_FST" \
   >"$RAW_DIR/simulator.stdout" 2>"$RAW_DIR/simulator.stderr"
 SIMULATOR_EXIT_CODE=$?
 set -e
@@ -187,6 +195,9 @@ for required_file in \
   fi
   cp "$required_file" "$RAW_DIR/$required_file"
 done
+if [[ ! -s "$WAVEFORM_FST" ]]; then
+  fail "Expected FST waveform is missing or empty: $WAVEFORM_FST"
+fi
 cp "$HELLO_ELF" "$RAW_DIR/hello_test.elf"
 popd >/dev/null
 
@@ -203,13 +214,27 @@ run_logged parse-trace \
   --timing-output "$NORMALIZED_DIR/timing.jsonl" \
   --report "$NORMALIZED_DIR/parser-report.json"
 
-CURRENT_STAGE="analyzing timing"
+run_logged convert-waveform \
+  fst2vcd "$WAVEFORM_FST" "$WAVEFORM_VCD"
+
+run_logged enrich-causal-timing \
+  python3 -m ibex_agent_verification.causal_vcd \
+  --vcd "$WAVEFORM_VCD" \
+  --metadata "$NORMALIZED_DIR/metadata.jsonl" \
+  --timing "$NORMALIZED_DIR/timing.jsonl" \
+  --output "$NORMALIZED_DIR/timing-causal.jsonl" \
+  --report "$NORMALIZED_DIR/causal-report.json" \
+  --waveform-source "raw/sim.fst"
+rm -f "$WAVEFORM_VCD"
+rmdir "$WORK_DIR" 2>/dev/null || true
+
+CURRENT_STAGE="analyzing causal timing"
 set +e
 record_command python3 -m ibex_agent_verification analyze-timing \
-  --input "$NORMALIZED_DIR/timing.jsonl" \
+  --input "$NORMALIZED_DIR/timing-causal.jsonl" \
   --report "$NORMALIZED_DIR/timing-report.json"
 python3 -m ibex_agent_verification analyze-timing \
-  --input "$NORMALIZED_DIR/timing.jsonl" \
+  --input "$NORMALIZED_DIR/timing-causal.jsonl" \
   --report "$NORMALIZED_DIR/timing-report.json" \
   >"$LOG_DIR/analyze-timing.stdout" 2>"$LOG_DIR/analyze-timing.stderr"
 TIMING_EXIT_CODE=$?
@@ -243,6 +268,6 @@ python3 -m ibex_agent_verification.evidence \
   --tool-versions-file "$TOOL_VERSIONS_FILE" \
   --commands-file "$COMMANDS_FILE"
 
-printf 'Ibex E2E evidence bundle created at %s\n' "$EVIDENCE_DIR"
+printf 'Ibex E2E causal evidence bundle created at %s\n' "$EVIDENCE_DIR"
 printf 'Ibex commit: %s\n' "$IBEX_RESOLVED_SHA"
 printf 'Timing analyzer exit code: %s\n' "$TIMING_EXIT_CODE"
