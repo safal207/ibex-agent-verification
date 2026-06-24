@@ -6,7 +6,7 @@ The timing analyzer detects deviations from a supplied cycle baseline and ranks 
 
 This module analyzes **cycle-level execution deviations**. It does not perform static timing analysis, sign-off timing closure, analog clock-jitter measurement, or prove a physical silicon defect.
 
-A reported cause is a rule-based hypothesis supported by the listed evidence. It must not be presented as a confirmed root cause until the relevant signals, waveform, configuration, and environment are reviewed.
+A reported cause is a rule-based classification supported by the listed evidence. It must not be presented as a confirmed processor defect until the relevant signals, waveform, configuration, program, and environment are reviewed.
 
 ## Input contract
 
@@ -39,7 +39,7 @@ Steps must increase strictly. Required cycle fields must be non-negative integer
 ## Result states
 
 - `ON_TIME`: actual cycles equal the supplied baseline.
-- `FASTER_THAN_EXPECTED`: execution completed below the baseline; no cause is inferred in the initial version.
+- `FASTER_THAN_EXPECTED`: execution completed below the baseline; no cause is inferred.
 - `DELAY_ANOMALY`: execution exceeded the baseline.
 - `INVALID_INPUT`: malformed JSONL or invalid fields.
 
@@ -48,6 +48,7 @@ The top-level report is `ANOMALY_DETECTED` when any sample is not `ON_TIME`.
 ## Supported evidence-backed candidates
 
 - `MEMORY_WAIT`
+- `INSTRUCTION_FETCH_WAIT`
 - `BRANCH_RECOVERY`
 - `PIPELINE_HAZARD`
 - `BUS_CONTENTION`
@@ -58,12 +59,39 @@ The top-level report is `ANOMALY_DETECTED` when any sample is not `ON_TIME`.
 
 Confidence is a deterministic rule score, not a statistical probability. The report preserves every matched signal and returns ranked candidates when multiple causes are supported.
 
+## Instruction fetch wait rule
+
+`INSTRUCTION_FETCH_WAIT` is emitted only when at least one explicit wait counter is positive:
+
+- `instruction_wait_cycles`: an accepted instruction transaction remains pending without `instr_rvalid`;
+- `instruction_grant_wait_cycles`: an instruction request remains ungranted.
+
+Supporting observations may increase confidence:
+
+- `instr_req=true`;
+- `instr_ready=false`;
+- `instr_grant=false`.
+
+A normal `instr_req=true` without a positive wait counter is **not** sufficient and does not create a candidate. For the common hosted response-wait evidence:
+
+```json
+{
+  "instruction_wait_cycles": 3,
+  "instr_req": true,
+  "instr_ready": false
+}
+```
+
+The deterministic confidence is `0.75`.
+
+When the same interval contains stronger memory evidence (`0.85`) or interrupt evidence (`0.85`), those remain primary and instruction fetch wait is preserved as a secondary candidate. This prevents normal prefetch overlap from replacing a better-supported cause.
+
 ## Command
 
 ```bash
 ibex-av analyze-timing \
-  --input examples/timing/memory_wait.jsonl \
-  --report artifacts/timing-report.json
+  --input artifacts/ibex-e2e/normalized/timing-causal.jsonl \
+  --report artifacts/ibex-e2e/normalized/timing-report.json
 ```
 
 Exit codes:
@@ -72,6 +100,8 @@ Exit codes:
 - `1`: at least one timing anomaly exists;
 - `2`: invalid input or execution error.
 
-## Current limitation
+## Current limits
 
-The example fixture is synthetic. Real Ibex integration still requires an adapter that extracts cycle boundaries and causal signals from simulator traces or waveforms while preserving the raw evidence.
+The pinned hosted waveform adapter currently supplies memory, instruction-fetch, interrupt, and trap observations. Branch recovery, true pipeline hazards, flushes, and execution-unit waits require additional explicit Ibex signals before those candidates can be confirmed from the hosted E2E waveform.
+
+The one-cycle retirement-gap baseline is intentionally simple. A classified wait may be expected behavior of the instruction memory, data memory, peripheral, program, or interrupt flow rather than a processor bug.
