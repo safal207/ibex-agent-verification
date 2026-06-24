@@ -47,4 +47,6 @@ if [[ "$ibex_timing_status" -ne 1 ]]; then
   exit 1
 fi
 
-echo "Fixture demo completed: functional comparison, official Ibex trace parsing, and timing analysis."
+bash ./scripts/run_silicon_gate_demo.sh artifacts/silicon-gate-demo
+
+echo "Fixture demo completed: functional comparison, official Ibex trace parsing, timing analysis, and silicon evidence gating."
