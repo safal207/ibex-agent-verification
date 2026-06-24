@@ -23,7 +23,7 @@ permissions:
 
 concurrency:
   group: ibex-e2e-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verilator-e2e:
