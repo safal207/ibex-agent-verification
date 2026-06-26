@@ -20,9 +20,11 @@ normalized reports + causal analysis     deterministic timing analysis
              manifest + SHA-256 inventory
                          ↓
             independent bundle verification
+                         ↓
+       checksum + provenance + keyless attestation
 ```
 
-The project preserves exact inputs, observed outputs, versions, timing evidence, and hashes. It does not ask a simulator, agent, provider, or benchmark to be trusted without reviewable evidence.
+The project preserves exact inputs, observed outputs, versions, timing evidence, and hashes. It does not ask a simulator, agent, provider, benchmark, release asset, or release publisher to be trusted without reviewable evidence.
 
 ## Confirmed hosted evidence
 
@@ -41,7 +43,10 @@ The Cerebras value records one client-observed API stream. It is not a vendor-wi
 - manifest inventories with byte sizes and SHA-256;
 - fail-closed rejection of malformed paths, symlinks, missing files, modified files, and unlisted additions;
 - independent verification with `ibex-av verify-evidence`;
-- commit-bound GitHub Actions artifacts and release evidence.
+- commit-bound GitHub Actions artifacts and release evidence;
+- deterministic release ZIPs with published checksum and provenance sidecars;
+- byte-for-byte verification after GitHub Release download;
+- OIDC-backed keyless Sigstore attestations bound to the repository workflow identity.
 
 ### Silicon rail
 
@@ -69,6 +74,7 @@ This is an early, honest prototype.
 - The first hosted Ibex E2E and causal-waveform runs completed on 2026-06-24.
 - The first fully green Cerebras live-evidence run completed on 2026-06-26 in [Actions run 28255376630](https://github.com/safal207/ibex-agent-verification/actions/runs/28255376630).
 - Release `v0.8.0` preserves that inference evidence as a deterministic release asset instead of relying only on the original 14-day Actions artifact.
+- Release `v0.8.1` intentionally reuses those immutable evidence bytes to exercise checksum, provenance, post-download byte verification, and keyless Sigstore attestation end to end.
 - No coverage-closure, silicon-signoff, provider-hardware, energy-efficiency, model-quality, or vendor-wide performance claim is made.
 
 ## Quick start
@@ -120,6 +126,7 @@ The pinned silicon workflow preserves raw traces, FST waveforms, normalized arch
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Evidence Bundle Verification](docs/EVIDENCE_BUNDLE_VERIFICATION.md)
+- [Release Artifact Attestations](docs/RELEASE_ATTESTATIONS.md)
 - [Causal Waveform Adapter](docs/CAUSAL_WAVEFORM_ADAPTER.md)
 - [Timing Root Cause Analysis](docs/TIMING_ANALYSIS.md)
 - [Cerebras Cloud Runner](docs/CEREBRAS_CLOUD_RUNNER.md)
@@ -139,6 +146,8 @@ real simulator, oracle, or hosted endpoint
 raw outputs + normalized evidence + versions
         ↓
 manifest + hashes + independent verification
+        ↓
+release checksum + provenance + keyless signature
         ↓
 human-reviewable decision
 ```
