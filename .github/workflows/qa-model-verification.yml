@@ -29,7 +29,7 @@ permissions:
 
 concurrency:
   group: ai-qa-engineer-verification-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   qa-suite:
@@ -44,6 +44,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - model: gpt-oss-120b
@@ -57,6 +58,7 @@ jobs:
       SUITE_PATH: benchmarks/qa-engineer-core-v0.1.json
       MODEL_ROOT: artifacts/${{ matrix.slug }}
       BUNDLE_DIR: artifacts/${{ matrix.slug }}/qa-benchmark
+      REQUEST_COOLDOWN_SECONDS: "15"
 
     steps:
       - name: Check out verification project
@@ -173,6 +175,9 @@ jobs:
               --model "$CEREBRAS_MODEL" \
               --output "$task_root/request.json"
 
+            echo "Cooling down ${REQUEST_COOLDOWN_SECONDS}s before task=$task_id model=$CEREBRAS_MODEL"
+            sleep "$REQUEST_COOLDOWN_SECONDS"
+
             set +e
             ibex-av run-cerebras-inference \
               --request "$task_root/request.json" \
@@ -266,6 +271,7 @@ jobs:
               f"- Perfect tasks: `{report['tasks_passed']}/{report['tasks_total']}`",
               f"- Failed tasks: `{report['tasks_failed']}`",
               f"- Invalid/inference failures: `{report['tasks_invalid']}`",
+              f"- Output-truncated tasks: `{report.get('tasks_truncated', 0)}`",
               "",
               "| Category | Score |",
               "|---|---:|",
