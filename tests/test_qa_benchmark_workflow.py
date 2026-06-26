@@ -34,6 +34,19 @@ class QABenchmarkWorkflowTests(unittest.TestCase):
         self.assertNotIn("actions/setup-python@v", WORKFLOW)
         self.assertNotIn("actions/upload-artifact@v", WORKFLOW)
 
+    def test_live_pull_request_mode_is_explicit_and_same_repo_only(self):
+        self.assertIn("  pull_request:", WORKFLOW)
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            WORKFLOW,
+        )
+        self.assertIn(
+            "startsWith(github.head_ref, 'verify/qa-suite-live-')",
+            WORKFLOW,
+        )
+        self.assertIn("github.event_name != 'pull_request'", WORKFLOW)
+        self.assertNotIn("pull_request_target:", WORKFLOW)
+
     def test_matrix_compares_exactly_two_models_without_fail_fast(self):
         self.assertIn("fail-fast: false", WORKFLOW)
         self.assertIn("- model: gpt-oss-120b", WORKFLOW)

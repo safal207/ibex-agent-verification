@@ -13,21 +13,38 @@ on:
       - "tests/test_qa_benchmark.py"
       - "tests/test_qa_benchmark_workflow.py"
       - "docs/AI_QA_ENGINEER_SUITE.md"
+  pull_request:
+    paths:
+      - ".github/workflows/qa-model-verification.yml"
+      - "benchmarks/qa-engineer-core-v0.1.json"
+      - "src/ibex_agent_verification/qa_benchmark.py"
+      - "scripts/qa_benchmark.py"
+      - "scripts/build_qa_benchmark_bundle.py"
+      - "tests/test_qa_benchmark.py"
+      - "tests/test_qa_benchmark_workflow.py"
+      - "docs/AI_QA_ENGINEER_SUITE.md"
 
 permissions:
   contents: read
 
 concurrency:
   group: ai-qa-engineer-verification-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   qa-suite:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        startsWith(github.head_ref, 'verify/qa-suite-live-')
+      )
     name: qa-suite (${{ matrix.model }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - model: gpt-oss-120b
@@ -41,6 +58,7 @@ jobs:
       SUITE_PATH: benchmarks/qa-engineer-core-v0.1.json
       MODEL_ROOT: artifacts/${{ matrix.slug }}
       BUNDLE_DIR: artifacts/${{ matrix.slug }}/qa-benchmark
+      REQUEST_COOLDOWN_SECONDS: "15"
 
     steps:
       - name: Check out verification project
@@ -157,6 +175,9 @@ jobs:
               --model "$CEREBRAS_MODEL" \
               --output "$task_root/request.json"
 
+            echo "Cooling down ${REQUEST_COOLDOWN_SECONDS}s before task=$task_id model=$CEREBRAS_MODEL"
+            sleep "$REQUEST_COOLDOWN_SECONDS"
+
             set +e
             ibex-av run-cerebras-inference \
               --request "$task_root/request.json" \
@@ -250,6 +271,7 @@ jobs:
               f"- Perfect tasks: `{report['tasks_passed']}/{report['tasks_total']}`",
               f"- Failed tasks: `{report['tasks_failed']}`",
               f"- Invalid/inference failures: `{report['tasks_invalid']}`",
+              f"- Output-truncated tasks: `{report.get('tasks_truncated', 0)}`",
               "",
               "| Category | Score |",
               "|---|---:|",
