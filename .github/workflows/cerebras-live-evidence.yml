@@ -1,0 +1,156 @@
+name: Cerebras Live Evidence
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cerebras-live-evidence.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cerebras-live-evidence
+  cancel-in-progress: false
+
+jobs:
+  live-evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+      CEREBRAS_MODEL: gpt-oss-120b
+      EVIDENCE_DIR: artifacts/cerebras-live-evidence
+      REQUEST_PATH: artifacts/cerebras-live-request.json
+
+    steps:
+      - name: Check out verification project
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Require Cerebras repository secret
+        shell: bash
+        run: |
+          if [[ -z "${CEREBRAS_API_KEY:-}" ]]; then
+            echo "::error::CEREBRAS_API_KEY repository secret is unavailable"
+            exit 4
+          fi
+
+      - name: Install verification project and pinned Cerebras SDK
+        run: python -m pip install -e '.[cerebras]'
+
+      - name: Prepare bounded streaming request
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          source = Path("tests/fixtures/inference/openai_request.json")
+          target = Path(os.environ["REQUEST_PATH"])
+          request = json.loads(source.read_text(encoding="utf-8"))
+          request["model"] = os.environ["CEREBRAS_MODEL"]
+          request.pop("max_tokens", None)
+          request["max_completion_tokens"] = 64
+          target.write_text(
+              json.dumps(request, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Run one live Cerebras stream
+        id: live
+        shell: bash
+        run: |
+          set +e
+          ibex-av run-cerebras-inference \
+            --request "$REQUEST_PATH" \
+            --model "$CEREBRAS_MODEL" \
+            --project-sha "$GITHUB_SHA" \
+            --timeout-seconds 60 \
+            --evidence-dir "$EVIDENCE_DIR" \
+            --report artifacts/cerebras-live-run-report.json
+          rc=$?
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Verify live evidence bundle integrity
+        if: always()
+        shell: bash
+        run: |
+          if [[ ! -f "$EVIDENCE_DIR/manifest.json" ]]; then
+            echo "::error::No Cerebras evidence manifest was produced"
+            exit 1
+          fi
+          ibex-av verify-evidence \
+            --manifest "$EVIDENCE_DIR/manifest.json" \
+            --report artifacts/cerebras-live-verification.json
+
+      - name: Enforce complete result and secret non-persistence
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = Path(os.environ["EVIDENCE_DIR"])
+          manifest_path = evidence / "manifest.json"
+          if not manifest_path.is_file():
+              raise SystemExit("missing evidence manifest")
+
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          result = manifest.get("result", {})
+          if result.get("status") != "COMPLETE":
+              raise SystemExit(
+                  f"live request was not complete: {result.get('status')} "
+                  f"HTTP={result.get('http_status')}"
+              )
+
+          secret = os.environ["CEREBRAS_API_KEY"].encode("utf-8")
+          for path in Path("artifacts").rglob("*"):
+              if path.is_file() and secret in path.read_bytes():
+                  raise SystemExit(f"credential value persisted in artifact: {path}")
+
+          timing = json.loads(
+              (evidence / "analysis.json").read_text(encoding="utf-8")
+          )["timing"]
+          print(
+              json.dumps(
+                  {
+                      "status": result["status"],
+                      "model": manifest["workload"]["model"],
+                      "http_status": result["http_status"],
+                      "time_to_first_output_ms": timing["time_to_first_output_ms"],
+                      "output_tokens_per_second": result[
+                          "output_tokens_per_second"
+                      ],
+                      "sdk_version": manifest["runner"]["sdk"]["version"],
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+          )
+          PY
+
+      - name: Upload Cerebras evidence and verification reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cerebras-live-evidence-${{ github.sha }}
+          path: |
+            artifacts/cerebras-live-evidence/
+            artifacts/cerebras-live-request.json
+            artifacts/cerebras-live-run-report.json
+            artifacts/cerebras-live-verification.json
+          if-no-files-found: warn
+          retention-days: 14
