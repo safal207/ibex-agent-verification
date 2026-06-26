@@ -172,11 +172,13 @@ def verify_manifest(*, evidence_dir: Path, manifest_path: Path) -> dict[str, Any
     if not root.is_dir():
         raise EvidenceError(f"evidence directory is not a directory: {evidence_dir}")
 
+    if manifest_path.is_symlink():
+        raise EvidenceError(f"evidence manifest must not be a symlink: {manifest_path}")
     try:
         manifest = manifest_path.resolve(strict=True)
     except OSError as exc:
         raise EvidenceError(f"evidence manifest does not exist: {manifest_path}") from exc
-    if not manifest.is_file() or manifest.is_symlink():
+    if not manifest.is_file():
         raise EvidenceError(f"evidence manifest is not a regular file: {manifest_path}")
     if not manifest.is_relative_to(root):
         raise EvidenceError("evidence manifest must be inside the evidence directory")
