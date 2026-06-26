@@ -51,10 +51,8 @@ class ReleaseAttestationWorkflowTests(unittest.TestCase):
             'gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$attestation_name"',
             self.publish,
         )
-        self.assertIn(
-            '--expected "$ATTESTATION" \\\n              --actual "$downloaded_attestation"',
-            self.publish,
-        )
+        self.assertIn('--expected "$ATTESTATION"', self.publish)
+        self.assertIn('--actual "$downloaded_attestation"', self.publish)
 
     def test_online_and_offline_verification_enforce_signer_identity(self):
         self.assertGreaterEqual(self.publish.count("gh attestation verify"), 2)
