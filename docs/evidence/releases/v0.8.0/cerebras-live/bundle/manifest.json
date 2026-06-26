@@ -1,0 +1,63 @@
+{
+  "claim_boundary": "This report verifies a recorded OpenAI-compatible API interaction and its client-observed and provider-reported timing metrics. It does not verify provider hardware, internal RTL, model quality, energy efficiency, or a vendor-wide tokens-per-second claim.",
+  "files": [
+    {
+      "path": "analysis.json",
+      "sha256": "8f66b3dd56e4ae0e41f815cb6d39941ef14c363daf7818dea03f1396f384df05",
+      "size_bytes": 1183
+    },
+    {
+      "path": "raw/capture.jsonl",
+      "sha256": "b9a9d815e2e93f49e5fc13a6766ff53601d9e88111a0265e6457b6d3e08a859b",
+      "size_bytes": 5606
+    },
+    {
+      "path": "raw/request.json",
+      "sha256": "a8a8dd85abfa119ccabca9bff3107379fa0e009d1e78b69761a241ed84048157",
+      "size_bytes": 254
+    }
+  ],
+  "generated_at_utc": "2026-06-26T17:47:16.990894+00:00",
+  "project": {
+    "commit": "9af7b7de6867d83321c935e37aeef9bf2b312bc1",
+    "repository": "safal207/ibex-agent-verification"
+  },
+  "result": {
+    "http_status": 200,
+    "output_tokens_per_second": 1912.297310144391,
+    "status": "COMPLETE",
+    "throughput_source": "provider_usage_and_time_info",
+    "time_to_first_output_ms": 203.354406
+  },
+  "runner": {
+    "capture": {
+      "chunk_count": 14,
+      "event_count": 17,
+      "http_status": 200,
+      "status": "CAPTURED"
+    },
+    "client": {
+      "max_retries": 0,
+      "timeout_seconds": 60.0,
+      "warm_tcp_connection": false
+    },
+    "client_close_error": null,
+    "clock": "time.monotonic_ns",
+    "credential_source": "environment:CEREBRAS_API_KEY",
+    "endpoint": "https://api.cerebras.ai",
+    "ignored_environment_base_url": false,
+    "provider": "cerebras",
+    "sdk": {
+      "package": "cerebras_cloud_sdk",
+      "version": "1.67.0"
+    }
+  },
+  "schema_version": 1,
+  "workload": {
+    "capture_sha256": "b9a9d815e2e93f49e5fc13a6766ff53601d9e88111a0265e6457b6d3e08a859b",
+    "kind": "openai_compatible_chat_completions",
+    "model": "gpt-oss-120b",
+    "provider": "cerebras",
+    "request_sha256": "a8a8dd85abfa119ccabca9bff3107379fa0e009d1e78b69761a241ed84048157"
+  }
+}

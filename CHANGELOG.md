@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0 — 2026-06-26
+
+- Added a provider-neutral hosted inference evidence rail.
+- Added a secured real Cerebras streaming runner pinned to SDK `1.67.0`.
+- Confirmed a fully green hosted run with HTTP `200`, TTFT `203.354406 ms`, and provider-timed throughput `1912.297310144391 tokens/s`.
+- Corrected reasoning-model throughput to use provider completion timing and refuse misleading client-derived rates when required timing is absent.
+- Preserved the sanitized request, stream capture, analysis, manifest, receipt, and verification report under `docs/evidence/releases/v0.8.0/`.
+- Added deterministic release ZIP construction and release-asset verification.
+- Corrected the README hosted causal counts to `385 MEMORY_WAIT`, `248 INSTRUCTION_FETCH_WAIT`, `6 INTERRUPT_SERVICE`, and `241 UNKNOWN`.
+- Made already-published release versions a successful no-op without moving immutable tags.
+
 ## 0.6.0 — 2026-06-24
 
 - Added evidence-backed `INSTRUCTION_FETCH_WAIT` timing classification.

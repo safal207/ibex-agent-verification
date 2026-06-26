@@ -1,0 +1,12 @@
+{
+  "commit": "9af7b7de6867d83321c935e37aeef9bf2b312bc1",
+  "http_status": 200,
+  "model": "gpt-oss-120b",
+  "output_tokens_per_second": 1912.297310144391,
+  "provider_completion_time_seconds": 0.032944668,
+  "run_url": "https://github.com/safal207/ibex-agent-verification/actions/runs/28255376630",
+  "sdk_version": "1.67.0",
+  "status": "COMPLETE",
+  "throughput_source": "provider_usage_and_time_info",
+  "time_to_first_output_ms": 203.354406
+}

@@ -1,0 +1,15 @@
+{
+  "max_completion_tokens": 64,
+  "messages": [
+    {
+      "content": "Return a two-word greeting.",
+      "role": "user"
+    }
+  ],
+  "model": "gpt-oss-120b",
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  },
+  "temperature": 0
+}
