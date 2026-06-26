@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "suite_id": "mobile-qa-engineer-v0.1",
+  "title": "Mobile QA Engineer Verification Suite v0.1",
+  "claim_boundary": "This suite measures exact decisions on five constrained mobile application incidents. It does not establish complete mobile QA seniority, device-lab coverage, accessibility quality, platform certification, or production readiness.",
+  "tasks": [
+    {
+      "id": "lifecycle-payment-recovery",
+      "category": "lifecycle_state",
+      "max_completion_tokens": 1024,
+      "prompt": "A mobile checkout sends POST /payments. The server commits payment 731, but the app is backgrounded before receiving the response and the OS kills the process. On cold start, local state says SUBMITTING while GET /payments/731 says PAID. Choose only from the provided enums. Return only one JSON object with exactly these keys and no Markdown: source_of_truth, retry_action, user_screen, regression_test. source_of_truth enum: local_submitting_state, server_payment_state, last_ui_screen, cached_cart. retry_action enum: resubmit_payment, do_not_resubmit, clear_payment, create_new_cart. user_screen enum: payment_success, payment_form, generic_error, empty_home. regression_test enum: cold_start_after_commit_before_ack, rotate_device_on_catalog, deny_camera_permission, clear_search_history.",
+      "expected": {
+        "source_of_truth": "server_payment_state",
+        "retry_action": "do_not_resubmit",
+        "user_screen": "payment_success",
+        "regression_test": "cold_start_after_commit_before_ack"
+      }
+    },
+    {
+      "id": "offline-sync-version-conflict",
+      "category": "offline_sync",
+      "max_completion_tokens": 1024,
+      "prompt": "A user edits a note offline using server version 7. While the device is offline, another client updates the same note to version 8. Reconnect sends the local update with If-Match: 7 and receives HTTP 409. Choose only from the provided enums. Return only one JSON object with exactly these keys and no Markdown: local_data_action, next_network_action, user_flow, forbidden_behavior. local_data_action enum: preserve_local_draft, delete_local_draft, overwrite_server_immediately, mark_sync_complete. next_network_action enum: fetch_server_version, retry_same_write_forever, logout_user, clear_database. user_flow enum: present_conflict_resolution, silently_choose_local, silently_choose_server, show_unrelated_error. forbidden_behavior enum: silent_overwrite, conflict_dialog, version_refresh, local_draft_storage.",
+      "expected": {
+        "local_data_action": "preserve_local_draft",
+        "next_network_action": "fetch_server_version",
+        "user_flow": "present_conflict_resolution",
+        "forbidden_behavior": "silent_overwrite"
+      }
+    },
+    {
+      "id": "android-permission-permanent-denial",
+      "category": "permissions",
+      "max_completion_tokens": 1024,
+      "prompt": "On Android, camera permission was denied with 'Don't ask again'. The platform reports permanently_denied when the user opens receipt scanning. Manual receipt entry is available. Choose only from the provided enums. Return only one JSON object with exactly these keys and no Markdown: permission_request, explanation, recovery_action, fallback. permission_request enum: request_again_immediately, do_not_request_again, uninstall_app, reset_account. explanation enum: explain_camera_need, hide_reason, blame_device, claim_permission_granted. recovery_action enum: open_app_settings, loop_permission_dialog, clear_user_data, contact_payment_gateway. fallback enum: keep_manual_entry, block_all_receipts, force_camera, close_application.",
+      "expected": {
+        "permission_request": "do_not_request_again",
+        "explanation": "explain_camera_need",
+        "recovery_action": "open_app_settings",
+        "fallback": "keep_manual_entry"
+      }
+    },
+    {
+      "id": "authenticated-push-deep-link",
+      "category": "deep_linking",
+      "max_completion_tokens": 1024,
+      "prompt": "A trusted push notification contains app://orders/731. The app is terminated and the user session is expired. The user taps the notification, completes authentication successfully, and order 731 is authorized for that user. Choose only from the provided enums. Return only one JSON object with exactly these keys and no Markdown: pre_auth_action, post_auth_destination, consumption, unauthorized_variant. pre_auth_action enum: store_pending_destination, discard_destination, open_order_without_auth, open_random_screen. post_auth_destination enum: order_731, home, login_again, order_732. consumption enum: consume_once, replay_on_every_launch, duplicate_navigation, never_consume. unauthorized_variant enum: show_access_denied, display_order_anyway, change_order_owner, crash_app.",
+      "expected": {
+        "pre_auth_action": "store_pending_destination",
+        "post_auth_destination": "order_731",
+        "consumption": "consume_once",
+        "unauthorized_variant": "show_access_denied"
+      }
+    },
+    {
+      "id": "transactional-database-migration",
+      "category": "data_migration",
+      "max_completion_tokens": 1024,
+      "prompt": "App version 5 migrates a local database created by version 4. The migration adds a required column with a deterministic default. The process crashes after updating some rows but before the migration transaction commits. On the next launch, choose only from the provided enums. Return only one JSON object with exactly these keys and no Markdown: persisted_partial_state, next_launch_action, user_data_action, forbidden_recovery. persisted_partial_state enum: rolled_back, partially_committed, marked_complete, uploaded_to_server. next_launch_action enum: retry_migration_transaction, skip_migration, create_empty_database, continue_partial_rows. user_data_action enum: preserve_existing_rows, delete_all_rows, logout_and_clear, replace_with_samples. forbidden_recovery enum: destructive_reset, transactional_retry, schema_validation, backup_restore.",
+      "expected": {
+        "persisted_partial_state": "rolled_back",
+        "next_launch_action": "retry_migration_transaction",
+        "user_data_action": "preserve_existing_rows",
+        "forbidden_recovery": "destructive_reset"
+      }
+    }
+  ]
+}
