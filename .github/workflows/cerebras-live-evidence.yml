@@ -6,23 +6,36 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/cerebras-live-evidence.yml"
+      - "tests/test_cerebras_model_matrix_workflow.py"
+      - "docs/MULTI_MODEL_EVIDENCE.md"
 
 permissions:
   contents: read
 
 concurrency:
-  group: cerebras-live-evidence
+  group: cerebras-live-evidence-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   live-evidence:
+    name: live-evidence (${{ matrix.model }})
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: gpt-oss-120b
+            slug: gpt-oss-120b
+          - model: zai-glm-4.7
+            slug: zai-glm-4-7
     env:
       CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
-      CEREBRAS_MODEL: gpt-oss-120b
-      EVIDENCE_DIR: artifacts/cerebras-live-evidence
-      REQUEST_PATH: artifacts/cerebras-live-request.json
+      CEREBRAS_MODEL: ${{ matrix.model }}
+      MODEL_SLUG: ${{ matrix.slug }}
+      ARTIFACT_ROOT: artifacts/${{ matrix.slug }}
+      EVIDENCE_DIR: artifacts/${{ matrix.slug }}/cerebras-live-evidence
+      REQUEST_PATH: artifacts/${{ matrix.slug }}/cerebras-live-request.json
 
     steps:
       - name: Check out verification project
@@ -45,10 +58,86 @@ jobs:
       - name: Install verification project and pinned Cerebras SDK
         run: python -m pip install -e '.[cerebras]'
 
+      - name: Verify model is currently listed by Cerebras
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_ROOT"
+          python - <<'PY'
+          import json
+          import os
+          from importlib import metadata
+          from pathlib import Path
+
+          from cerebras.cloud.sdk import Cerebras
+
+          api_key = os.environ["CEREBRAS_API_KEY"]
+          requested = os.environ["CEREBRAS_MODEL"]
+          output = Path(os.environ["ARTIFACT_ROOT"]) / "cerebras-model-catalog.json"
+          client = Cerebras(
+              api_key=api_key,
+              base_url="https://api.cerebras.ai",
+              timeout=30,
+              max_retries=0,
+              warm_tcp_connection=False,
+          )
+          try:
+              response = client.models.list()
+              data = getattr(response, "data", None)
+              if data is None and isinstance(response, dict):
+                  data = response.get("data")
+              if not isinstance(data, (list, tuple)):
+                  raise SystemExit("Cerebras models.list() returned no model array")
+
+              models = []
+              for item in data:
+                  model_id = getattr(item, "id", None)
+                  owner = getattr(item, "owned_by", None)
+                  if isinstance(item, dict):
+                      model_id = item.get("id", model_id)
+                      owner = item.get("owned_by", owner)
+                  if not isinstance(model_id, str) or not model_id.strip():
+                      raise SystemExit("Cerebras model catalog contains an invalid id")
+                  models.append(
+                      {
+                          "id": model_id,
+                          "owned_by": owner if isinstance(owner, str) else None,
+                      }
+                  )
+          finally:
+              close = getattr(client, "close", None)
+              if callable(close):
+                  close()
+
+          models.sort(key=lambda item: item["id"])
+          available = [item["id"] for item in models]
+          report = {
+              "schema_version": 1,
+              "provider": "cerebras",
+              "endpoint": "https://api.cerebras.ai/v1/models",
+              "requested_model": requested,
+              "requested_model_available": requested in available,
+              "models": models,
+              "sdk": {
+                  "package": "cerebras_cloud_sdk",
+                  "version": metadata.version("cerebras_cloud_sdk"),
+              },
+          }
+          output.write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          if requested not in available:
+              raise SystemExit(
+                  f"requested Cerebras model is not currently available: {requested}"
+              )
+          PY
+
       - name: Prepare bounded streaming request
         shell: bash
         run: |
-          mkdir -p artifacts
+          mkdir -p "$ARTIFACT_ROOT"
           python - <<'PY'
           import json
           import os
@@ -77,7 +166,7 @@ jobs:
             --project-sha "$GITHUB_SHA" \
             --timeout-seconds 60 \
             --evidence-dir "$EVIDENCE_DIR" \
-            --report artifacts/cerebras-live-run-report.json
+            --report "$ARTIFACT_ROOT/cerebras-live-run-report.json"
           rc=$?
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
           exit 0
@@ -87,12 +176,12 @@ jobs:
         shell: bash
         run: |
           if [[ ! -f "$EVIDENCE_DIR/manifest.json" ]]; then
-            echo "::error::No Cerebras evidence manifest was produced"
+            echo "::error::No Cerebras evidence manifest was produced for $CEREBRAS_MODEL"
             exit 1
           fi
           ibex-av verify-evidence \
             --manifest "$EVIDENCE_DIR/manifest.json" \
-            --report artifacts/cerebras-live-verification.json
+            --report "$ARTIFACT_ROOT/cerebras-live-verification.json"
 
       - name: Enforce complete result and secret non-persistence
         if: always()
@@ -115,9 +204,17 @@ jobs:
                   f"live request was not complete: {result.get('status')} "
                   f"HTTP={result.get('http_status')}"
               )
+          observed_model = manifest.get("workload", {}).get("model")
+          expected_model = os.environ["CEREBRAS_MODEL"]
+          if observed_model != expected_model:
+              raise SystemExit(
+                  f"evidence model mismatch: expected={expected_model!r} "
+                  f"observed={observed_model!r}"
+              )
 
           secret = os.environ["CEREBRAS_API_KEY"].encode("utf-8")
-          for path in Path("artifacts").rglob("*"):
+          root = Path(os.environ["ARTIFACT_ROOT"])
+          for path in root.rglob("*"):
               if path.is_file() and secret in path.read_bytes():
                   raise SystemExit(f"credential value persisted in artifact: {path}")
           PY
@@ -131,6 +228,7 @@ jobs:
           import os
           from pathlib import Path
 
+          root = Path(os.environ["ARTIFACT_ROOT"])
           evidence = Path(os.environ["EVIDENCE_DIR"])
           manifest_path = evidence / "manifest.json"
           analysis_path = evidence / "analysis.json"
@@ -144,6 +242,7 @@ jobs:
               "commit": os.environ["GITHUB_SHA"],
               "status": "NO_MANIFEST",
               "model": os.environ["CEREBRAS_MODEL"],
+              "model_slug": os.environ["MODEL_SLUG"],
               "http_status": None,
               "time_to_first_output_ms": None,
               "output_tokens_per_second": None,
@@ -184,9 +283,8 @@ jobs:
                   "completion_time"
               )
 
-          artifacts = Path("artifacts")
-          artifacts.mkdir(exist_ok=True)
-          receipt_json = artifacts / "cerebras-live-receipt.json"
+          root.mkdir(parents=True, exist_ok=True)
+          receipt_json = root / "cerebras-live-receipt.json"
           receipt_json.write_text(
               json.dumps(receipt, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
@@ -198,7 +296,7 @@ jobs:
           icon = "✅" if receipt["status"] == "COMPLETE" else "❌"
           markdown = "\n".join(
               [
-                  f"## {icon} Cerebras live evidence",
+                  f"## {icon} Cerebras live evidence — {receipt['model']}",
                   "",
                   f"- Run: {receipt['run_url']}",
                   f"- Commit: `{receipt['commit']}`",
@@ -219,12 +317,12 @@ jobs:
                   "",
                   (
                       "Claim boundary: one client-observed API stream and bundle "
-                      "integrity; no internal hardware or RTL claim."
+                      "integrity; no internal hardware, model-quality, or RTL claim."
                   ),
                   "",
               ]
           )
-          (artifacts / "cerebras-live-receipt.md").write_text(
+          (root / "cerebras-live-receipt.md").write_text(
               markdown, encoding="utf-8"
           )
           with Path(os.environ["GITHUB_STEP_SUMMARY"]).open(
@@ -234,17 +332,11 @@ jobs:
           print(markdown)
           PY
 
-      - name: Upload Cerebras evidence and verification reports
+      - name: Upload model-scoped Cerebras evidence and reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cerebras-live-evidence-${{ github.sha }}
-          path: |
-            artifacts/cerebras-live-evidence/
-            artifacts/cerebras-live-request.json
-            artifacts/cerebras-live-run-report.json
-            artifacts/cerebras-live-verification.json
-            artifacts/cerebras-live-receipt.json
-            artifacts/cerebras-live-receipt.md
+          name: cerebras-live-evidence-${{ matrix.slug }}-${{ github.sha }}
+          path: artifacts/${{ matrix.slug }}/
           if-no-files-found: warn
           retention-days: 14
