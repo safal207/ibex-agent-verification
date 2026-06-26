@@ -19,6 +19,7 @@ from ibex_agent_verification.qa_benchmark import (
     score_qa_capture,
     summarize_qa_reports,
 )
+from ibex_agent_verification.qa_scorecard import build_reliability_scorecard
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -118,6 +119,31 @@ def _annotate_completion_budget(
     return payload
 
 
+def _attach_reliability_scorecard(payload: dict, reports: list[dict]) -> dict:
+    scorecard = build_reliability_scorecard(reports)
+    end_to_end = scorecard["end_to_end_score"]
+    legacy_score = payload.get("score", {})
+    for key in ("earned", "possible", "percent"):
+        if legacy_score.get(key) != end_to_end.get(key):
+            raise QABenchmarkError(
+                f"legacy score and reliability scorecard disagree for {key}"
+            )
+
+    outcomes = scorecard["outcomes"]
+    payload["scorecard_version"] = 2
+    payload["scorecard"] = scorecard
+    payload["tasks_completed"] = scorecard["completion_reliability"]["completed"]
+    payload["tasks_truncated"] = outcomes["output_truncated"]
+    payload["tasks_inference_failed"] = outcomes["inference_failed"]
+    payload["tasks_invalid"] = (
+        outcomes["invalid_response"]
+        + outcomes["output_truncated"]
+        + outcomes["inference_failed"]
+    )
+    payload["tasks_provider_failed"] = scorecard["provider_reliability"]["failed"]
+    return payload
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Prepare, score, and summarize deterministic AI QA benchmark evidence."
@@ -204,15 +230,7 @@ def main(argv: list[str] | None = None) -> int:
                 provider=args.provider,
                 model=args.model,
             )
-            truncated = sum(
-                report.get("status") == "OUTPUT_TRUNCATED" for report in reports
-            )
-            payload["tasks_truncated"] = truncated
-            payload["tasks_invalid"] = sum(
-                report.get("status")
-                in {"INVALID_RESPONSE", "INFERENCE_FAILED", "OUTPUT_TRUNCATED"}
-                for report in reports
-            )
+            payload = _attach_reliability_scorecard(payload, reports)
             _write_json(args.report, payload)
         else:
             return 2
