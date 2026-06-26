@@ -25,9 +25,8 @@ class ReleaseEvidenceAssetTests(unittest.TestCase):
             alias_zip = Path(temporary) / "alias.zip"
             original_digest = build_asset(original, original_zip)
             alias_digest = build_asset(alias, alias_zip)
-
-        self.assertEqual(original_digest, alias_digest)
-        self.assertEqual(original_zip.read_bytes(), alias_zip.read_bytes())
+            self.assertEqual(original_digest, alias_digest)
+            self.assertEqual(original_zip.read_bytes(), alias_zip.read_bytes())
 
 
 if __name__ == "__main__":
