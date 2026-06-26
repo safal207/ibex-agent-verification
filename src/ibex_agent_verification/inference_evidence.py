@@ -22,6 +22,7 @@ _ALLOWED_EVENTS = {
     "request_error",
 }
 _TERMINAL_EVENTS = {"request_end", "request_error"}
+_SENSITIVE_KEYS = {"authorization", "api_key", "api-key", "x-api-key"}
 
 
 def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
@@ -34,6 +35,24 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise InferenceEvidenceError(f"{label} must be a JSON object")
     return payload
+
+
+def _find_sensitive_key(value: Any, *, path: str = "$") -> str | None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key)
+            child_path = f"{path}.{key_text}"
+            if key_text.lower() in _SENSITIVE_KEYS:
+                return child_path
+            found = _find_sensitive_key(item, path=child_path)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            found = _find_sensitive_key(item, path=f"{path}[{index}]")
+            if found is not None:
+                return found
+    return None
 
 
 def load_capture(path: Path) -> list[dict[str, Any]]:
@@ -267,22 +286,39 @@ def build_inference_bundle(
     model: str,
     project_sha: str,
 ) -> dict[str, Any]:
-    if evidence_dir.exists() and any(evidence_dir.iterdir()):
+    if evidence_dir.exists():
+        if evidence_dir.is_symlink() or not evidence_dir.is_dir():
+            raise InferenceEvidenceError(
+                f"evidence directory must be a real directory: {evidence_dir}"
+            )
+        if any(evidence_dir.iterdir()):
+            raise InferenceEvidenceError(
+                f"evidence directory must be empty or absent: {evidence_dir}"
+            )
+    if capture_path.is_symlink() or not capture_path.is_file():
         raise InferenceEvidenceError(
-            f"evidence directory must be empty or absent: {evidence_dir}"
+            f"capture file must be a regular non-symlink file: {capture_path}"
         )
-    if not capture_path.is_file():
-        raise InferenceEvidenceError(f"capture file does not exist: {capture_path}")
-    if not request_path.is_file():
-        raise InferenceEvidenceError(f"request file does not exist: {request_path}")
+    if request_path.is_symlink() or not request_path.is_file():
+        raise InferenceEvidenceError(
+            f"request file must be a regular non-symlink file: {request_path}"
+        )
     if not project_sha.strip():
         raise InferenceEvidenceError("project_sha must be a non-empty string")
 
     request_payload = _load_json_object(request_path, label="request")
-    if any(key.lower() in {"authorization", "api_key", "api-key"} for key in request_payload):
+    sensitive_path = _find_sensitive_key(request_payload)
+    if sensitive_path is not None:
         raise InferenceEvidenceError(
-            "request JSON must not contain authorization or API key fields"
+            f"request JSON must not contain authorization or API key fields: {sensitive_path}"
         )
+    request_model = request_payload.get("model")
+    if not isinstance(request_model, str) or request_model != model:
+        raise InferenceEvidenceError(
+            "request JSON model must exactly match the --model value"
+        )
+    if request_payload.get("stream") is not True:
+        raise InferenceEvidenceError("request JSON stream must be true")
 
     events = load_capture(capture_path)
     analysis = analyze_capture(events, provider=provider, model=model)
