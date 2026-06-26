@@ -1,0 +1,5 @@
+{"event": "request_start", "monotonic_ns": 1000000000}
+{"event": "response_headers", "monotonic_ns": 1050000000, "status_code": 200}
+{"event": "chunk", "monotonic_ns": 1100000000, "payload": {"choices": [{"delta": {"content": "example "}}]}}
+{"event": "chunk", "monotonic_ns": 1300000000, "payload": {"choices": [{"delta": {"content": "output"}}], "usage": {"prompt_tokens": 8, "completion_tokens": 20, "total_tokens": 28}}}
+{"event": "request_end", "monotonic_ns": 1500000000}

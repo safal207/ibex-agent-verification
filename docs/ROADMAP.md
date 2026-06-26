@@ -58,6 +58,25 @@ Hosted run #30 aligned all `1204/1204` retirements, preserved the same pinned ra
 
 See [Causal Waveform Adapter](CAUSAL_WAVEFORM_ADAPTER.md) and [Hosted Causal Waveform E2E Evidence](HOSTED_CAUSAL_E2E_EVIDENCE_2026-06-24.md).
 
+## Experimental cross-domain adapter — inference evidence 🧪
+
+The repository is still Ibex-first. This adapter tests whether the same evidence contract can extend to API-level AI accelerator observations without claiming access to closed hardware internals.
+
+- ✅ validate timestamped OpenAI-compatible stream captures
+- ✅ preserve sanitized requests and raw response chunks
+- ✅ derive client-observed latency and time to first output
+- ✅ compute throughput only from provider-reported token usage
+- ✅ refuse to estimate tokens per second when usage is absent
+- ✅ reject API-key fields from persisted request JSON
+- ✅ emit a manifest compatible with `verify-evidence`
+- ⏳ direct Cerebras Cloud capture runner with pinned client version
+- ⏳ repeated runs, warmups, p50/p95, and error-rate aggregation
+- ⏳ independent tokenizer-based token counting
+- ⏳ provider comparison under one workload contract
+- ⏳ model quality and numerical-drift gates
+
+See [OpenAI-Compatible Inference Evidence](INFERENCE_EVIDENCE.md).
+
 ## Phase 2 — reference ISA oracle
 
 - add a pinned Spike or Sail adapter
@@ -98,4 +117,5 @@ See [Causal Waveform Adapter](CAUSAL_WAVEFORM_ADAPTER.md) and [Hosted Causal Wav
 - replacing the Ibex DV environment;
 - performing physical static timing analysis or sign-off timing closure;
 - generating silicon-ready sign-off evidence;
-- reporting speculative bugs or confirmed root causes without raw evidence.
+- reporting speculative bugs or confirmed root causes without raw evidence;
+- claiming that an API-level inference capture proves accelerator hardware correctness.
