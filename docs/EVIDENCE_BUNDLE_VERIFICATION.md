@@ -9,8 +9,10 @@ When the manifest is stored at the bundle root:
 ```bash
 ibex-av verify-evidence \
   --manifest artifacts/ibex-e2e/manifest.json \
-  --report artifacts/ibex-e2e/verification-report.json
+  --report artifacts/ibex-e2e-verification.json
 ```
+
+Keep the optional verification report outside the evidence directory. Adding it inside the bundle after verification would create a new file that is not part of the manifest inventory.
 
 Use `--evidence-dir` when the manifest path and bundle root are supplied separately:
 
