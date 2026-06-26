@@ -30,7 +30,7 @@ benchmarks/qa-suite-catalog.json
 
 The catalog is validated before live inference. Suite paths must remain inside the repository, IDs and task counts must match the actual files, and model/suite slugs must be unique.
 
-## Scoring contract
+## Task scoring contract
 
 Each prompt requires one strict JSON object:
 
@@ -41,11 +41,66 @@ Each prompt requires one strict JSON object:
 - exact values and array ordering;
 - no credential-like keys.
 
-The scorer awards one point for exact structure and one point for each expected leaf value. Invalid, failed, and output-truncated responses retain the full task denominator, so every model is compared against the same possible score.
+The task scorer awards one point for exact structure and one point for each expected leaf value. Invalid, failed, and output-truncated responses retain the full task denominator, so every model is compared against the same possible score.
 
 `finish_reason=length` is reported explicitly as `OUTPUT_TRUNCATED`, rather than being disguised as an ordinary wrong answer.
 
 The scorer is deterministic. It does not ask a second language model to grade the first model.
+
+## Three-axis run scorecard
+
+A single percentage cannot distinguish knowledge errors from answer-completion failures or provider outages. Every suite/model summary therefore publishes three orthogonal axes plus a backward-compatible end-to-end score.
+
+### End-to-end score
+
+Field-level points across every configured task. Invalid JSON, truncation, and provider failure receive zero points while retaining the task's full denominator.
+
+This is the strictest operational result: it answers whether the full benchmark run delivered correct, machine-checkable outputs.
+
+### Answer correctness
+
+Field-level points only across tasks that produced valid strict JSON and were scored `PASS` or `FAIL`.
+
+This axis isolates the quality of inspectable answers. It excludes invalid, truncated, and inference-failed tasks rather than pretending that no answer was a wrong professional decision.
+
+When no task produced a valid strict-JSON answer, the percentage is `null` and displayed as `n/a`, not zero.
+
+### Completion reliability
+
+The fraction of configured tasks that produced a valid strict-JSON answer:
+
+```text
+completed PASS-or-FAIL tasks / all configured tasks
+```
+
+`INVALID_RESPONSE`, `OUTPUT_TRUNCATED`, and `INFERENCE_FAILED` are incomplete.
+
+### Provider reliability
+
+The fraction of requests with known provider outcomes that completed with HTTP 2xx:
+
+```text
+successful HTTP 2xx requests / known provider outcomes
+```
+
+A valid request that returns HTTP 2xx remains a provider success even when the model emits invalid JSON or reaches `finish_reason=length`. HTTP 429, other non-2xx responses, timeouts, and transport failures reduce provider reliability.
+
+Missing legacy metadata is counted as `unknown` and excluded from the provider percentage rather than silently classified as success or failure.
+
+### Reading the axes together
+
+For example:
+
+```text
+End-to-end score:       10/25 = 40%
+Answer correctness:     10/10 = 100%
+Completion reliability:  2/5  = 40%
+Provider reliability:     5/5  = 100%
+```
+
+This means the completed answers were fully correct, but three tasks never produced a valid final answer. It does not mean the model demonstrated only 40% domain knowledge, and it does not justify reporting 100% operational quality.
+
+The scorecard also records separate outcome counts for `PASS`, `FAIL`, `INVALID_RESPONSE`, `OUTPUT_TRUNCATED`, and `INFERENCE_FAILED`, plus provider failure classes such as `http_429` or `transport_timeout_or_unknown`.
 
 ## Live execution
 
@@ -64,7 +119,7 @@ Jobs run sequentially, with a cooldown before each inference, to reduce provider
 4. records each raw streaming interaction;
 5. builds and independently verifies an inference evidence manifest;
 6. scores the exact streamed JSON response;
-7. produces a suite/model summary;
+7. produces a three-axis suite/model scorecard;
 8. builds an outer SHA-256 manifest covering requests, captures, inference manifests, score reports, model catalog, and summary;
 9. scans every output for the repository credential value;
 10. uploads a suite-and-model-scoped evidence artifact.
@@ -98,9 +153,9 @@ The outer verification report is stored next to the bundle so it cannot silently
 
 ## What a score means
 
-A score supports a narrow claim:
+A scorecard supports a narrow claim:
 
-> On this exact versioned set of constrained QA tasks, the model produced these exact responses and earned these deterministic field-level points.
+> On this exact versioned set of constrained QA tasks, the model produced these exact responses, completed this fraction of tasks, and experienced these provider outcomes.
 
 It does not prove:
 
