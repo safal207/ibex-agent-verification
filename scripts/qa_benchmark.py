@@ -6,10 +6,14 @@ import json
 import sys
 from pathlib import Path
 
-from ibex_agent_verification.inference_evidence import InferenceEvidenceError
+from ibex_agent_verification.inference_evidence import (
+    InferenceEvidenceError,
+    load_capture,
+)
 from ibex_agent_verification.qa_benchmark import (
     QABenchmarkError,
     build_qa_request,
+    get_qa_task,
     load_qa_suite,
     score_qa_capture,
     summarize_qa_reports,
@@ -35,6 +39,54 @@ def _read_report(path: Path) -> dict:
         raise QABenchmarkError(f"{path}: invalid QA task report JSON: {error.msg}") from error
     if not isinstance(payload, dict):
         raise QABenchmarkError(f"QA task report must be an object: {path}")
+    return payload
+
+
+def _finish_reasons(capture_path: Path) -> list[str]:
+    reasons: list[str] = []
+    for event in load_capture(capture_path):
+        if event.get("event") != "chunk":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        choices = payload.get("choices")
+        if not isinstance(choices, list):
+            continue
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            reason = choice.get("finish_reason")
+            if isinstance(reason, str) and reason and reason not in reasons:
+                reasons.append(reason)
+    return reasons
+
+
+def _annotate_completion_budget(
+    payload: dict,
+    *,
+    capture_path: Path,
+    max_completion_tokens: int,
+) -> dict:
+    reasons = _finish_reasons(capture_path)
+    payload["finish_reasons"] = reasons
+    if "length" not in reasons:
+        return payload
+
+    payload["status"] = "OUTPUT_TRUNCATED"
+    payload["score"] = {"earned": 0, "possible": 1, "percent": 0.0}
+    payload["parse_error"] = (
+        "provider ended the completion with finish_reason=length before a complete "
+        "strict-JSON answer was available"
+    )
+    payload["checks"] = []
+    payload.pop("observed", None)
+    payload["diagnostic"] = {
+        "code": "OUTPUT_TRUNCATED",
+        "finish_reason": "length",
+        "max_completion_tokens": max_completion_tokens,
+        "classification": "benchmark_configuration_or_model_budget_limit",
+    }
     return payload
 
 
@@ -79,12 +131,18 @@ def main(argv: list[str] | None = None) -> int:
             )
             _write_json(args.output, payload)
         elif args.command == "score":
+            task = get_qa_task(suite, args.task_id)
             payload = score_qa_capture(
                 suite=suite,
                 task_id=args.task_id,
                 capture_path=args.capture,
                 provider=args.provider,
                 model=args.model,
+            )
+            payload = _annotate_completion_budget(
+                payload,
+                capture_path=args.capture,
+                max_completion_tokens=task["max_completion_tokens"],
             )
             _write_json(args.report, payload)
         elif args.command == "summarize":
@@ -111,6 +169,15 @@ def main(argv: list[str] | None = None) -> int:
                 reports=reports,
                 provider=args.provider,
                 model=args.model,
+            )
+            truncated = sum(
+                report.get("status") == "OUTPUT_TRUNCATED" for report in reports
+            )
+            payload["tasks_truncated"] = truncated
+            payload["tasks_invalid"] = sum(
+                report.get("status")
+                in {"INVALID_RESPONSE", "INFERENCE_FAILED", "OUTPUT_TRUNCATED"}
+                for report in reports
             )
             _write_json(args.report, payload)
         else:
