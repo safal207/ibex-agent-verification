@@ -170,11 +170,20 @@ class EvidenceVerificationTests(unittest.TestCase):
             with self.assertRaisesRegex(EvidenceError, "duplicate path"):
                 verify_manifest(evidence_dir=root, manifest_path=manifest)
 
+    def test_rejects_manifest_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.make_bundle(root)
+            linked_manifest = root / "linked-manifest.json"
+            linked_manifest.symlink_to(manifest.name)
+            with self.assertRaisesRegex(EvidenceError, "must not be a symlink"):
+                verify_manifest(evidence_dir=root, manifest_path=linked_manifest)
+
     def test_cli_exit_codes_and_report(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             manifest = self.make_bundle(root)
-            report = root / "verification.json"
+            report = root.parent / f"{root.name}-verification.json"
             with redirect_stdout(StringIO()):
                 self.assertEqual(
                     main(
@@ -201,6 +210,25 @@ class EvidenceVerificationTests(unittest.TestCase):
                 self.assertEqual(
                     main(["verify-evidence", "--manifest", str(manifest)]), 2
                 )
+
+    def test_cli_rejects_report_inside_evidence_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.make_bundle(root)
+            report = root / "verification-report.json"
+            with redirect_stderr(StringIO()):
+                exit_code = main(
+                    [
+                        "verify-evidence",
+                        "--manifest",
+                        str(manifest),
+                        "--report",
+                        str(report),
+                    ]
+                )
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(report.exists())
 
 
 if __name__ == "__main__":
