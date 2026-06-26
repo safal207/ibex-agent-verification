@@ -115,6 +115,33 @@ class QASuiteCatalogTests(unittest.TestCase):
             with self.assertRaisesRegex(QAMatrixError, "duplicate model slug"):
                 build_workflow_matrix(catalog_path)
 
+    def test_catalog_and_suite_symlinks_are_rejected_before_resolution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            benchmarks = root / "benchmarks"
+            benchmarks.mkdir()
+            real_suite = benchmarks / "real-suite.json"
+            real_suite.write_bytes(CORE_SUITE_PATH.read_bytes())
+            suite_link = benchmarks / "suite-link.json"
+            try:
+                suite_link.symlink_to(real_suite.name)
+            except OSError as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+
+            catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+            catalog["suites"] = [dict(catalog["suites"][0])]
+            catalog["suites"][0]["path"] = "benchmarks/suite-link.json"
+            real_catalog = benchmarks / "real-catalog.json"
+            real_catalog.write_text(json.dumps(catalog), encoding="utf-8")
+
+            with self.assertRaisesRegex(QAMatrixError, "non-symlink"):
+                build_workflow_matrix(real_catalog)
+
+            catalog_link = benchmarks / "catalog-link.json"
+            catalog_link.symlink_to(real_catalog.name)
+            with self.assertRaisesRegex(QAMatrixError, "non-symlink"):
+                build_workflow_matrix(catalog_link)
+
     def test_cli_returns_two_for_invalid_catalog(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "catalog.json"
