@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "suite_id": "qa-engineer-core-v0.1",
+  "title": "AI QA Engineer Core Verification Suite v0.1",
+  "claim_boundary": "This suite measures exact task completion on five constrained QA scenarios. It is not a complete measure of QA seniority, product judgment, model intelligence, or production readiness.",
+  "tasks": [
+    {
+      "id": "bug-triage-idempotency",
+      "category": "bug_triage",
+      "max_completion_tokens": 160,
+      "prompt": "You are triaging a checkout incident. The first POST /orders reached the database and committed order 731, but the gateway timed out before returning the response. The client retried the same body without an Idempotency-Key, and the service committed order 732 for the same cart_id. Choose only from the provided enums. Return only one JSON object with exactly these keys and no Markdown: root_cause, severity, owning_layer, regression_test. root_cause enum: database_rollback_failure, missing_idempotency_protection, stale_cache, ui_double_click_only. severity enum: low, medium, high, critical. owning_layer enum: client, api, database, network. regression_test enum: retry_after_commit_before_response, refresh_product_page, expire_cache_entry, rotate_database_password.",
+      "expected": {
+        "root_cause": "missing_idempotency_protection",
+        "severity": "high",
+        "owning_layer": "api",
+        "regression_test": "retry_after_commit_before_response"
+      }
+    },
+    {
+      "id": "test-design-boundaries",
+      "category": "test_design",
+      "max_completion_tokens": 160,
+      "prompt": "A registration API accepts age only as an integer from 18 through 65 inclusive. Produce the five exact boundary/type values requested. Return only one JSON object with exactly these keys and no Markdown: below_min, min_valid, max_valid, above_max, non_integer. Use JSON numbers, not strings.",
+      "expected": {
+        "below_min": 17,
+        "min_valid": 18,
+        "max_valid": 65,
+        "above_max": 66,
+        "non_integer": 18.5
+      }
+    },
+    {
+      "id": "api-contract-statuses",
+      "category": "api_testing",
+      "max_completion_tokens": 200,
+      "prompt": "Use this explicit API contract: missing authentication returns 401; authenticated users without permission return 403; malformed JSON returns 400; valid JSON missing a required business field returns 422; a stale optimistic-lock version returns 409; deleting an already absent resource is idempotent and returns 204. Return only one JSON object with exactly these keys and integer values: missing_auth, missing_permission, malformed_json, missing_required_field, stale_version, delete_absent.",
+      "expected": {
+        "missing_auth": 401,
+        "missing_permission": 403,
+        "malformed_json": 400,
+        "missing_required_field": 422,
+        "stale_version": 409,
+        "delete_absent": 204
+      }
+    },
+    {
+      "id": "sql-result-paid-orders",
+      "category": "sql",
+      "max_completion_tokens": 220,
+      "prompt": "Given rows (id, customer, status, amount): (1, alice, PAID, 40), (2, alice, PAID, 60), (3, alice, REFUNDED, 100), (4, bob, PAID, 30), (5, bob, PAID, 20). Evaluate: SELECT customer, SUM(amount) AS total FROM orders WHERE status = 'PAID' GROUP BY customer HAVING SUM(amount) >= 50 ORDER BY customer; Return only one JSON object with exactly two keys: rows and row_count. rows must be a JSON array in query order, each item having exactly customer and total.",
+      "expected": {
+        "rows": [
+          {
+            "customer": "alice",
+            "total": 100
+          },
+          {
+            "customer": "bob",
+            "total": 50
+          }
+        ],
+        "row_count": 2
+      }
+    },
+    {
+      "id": "logs-duplicate-order",
+      "category": "log_analysis",
+      "max_completion_tokens": 180,
+      "prompt": "Analyze this ordered incident trace: inventory reserve OK; payment authorization OK; database order write 731 OK; gateway response timeout; client retry without Idempotency-Key; database order write 732 OK for the same cart_id. Choose only from the provided enums. Return only one JSON object with exactly these keys and no Markdown: first_failure, customer_impact, preventive_control, component_to_fix_first. first_failure enum: inventory_failure, payment_failure, gateway_response_timeout, database_write_failure. customer_impact enum: duplicate_order, lost_payment, stale_catalog, no_impact. preventive_control enum: idempotency_key, longer_cache_ttl, database_backup, ui_animation. component_to_fix_first enum: orders_api, inventory_service, payment_provider, product_catalog.",
+      "expected": {
+        "first_failure": "gateway_response_timeout",
+        "customer_impact": "duplicate_order",
+        "preventive_control": "idempotency_key",
+        "component_to_fix_first": "orders_api"
+      }
+    }
+  ]
+}
