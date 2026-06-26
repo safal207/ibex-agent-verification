@@ -50,6 +50,7 @@ class InferenceEvidenceTests(unittest.TestCase):
             json.dumps(
                 {
                     "model": "test-model",
+                    "stream": True,
                     "messages": [{"role": "user", "content": "hi"}],
                 }
             ),
@@ -173,11 +174,20 @@ class InferenceEvidenceTests(unittest.TestCase):
                 "VERIFIED",
             )
 
-    def test_rejects_api_key_in_request_json(self):
+    def test_rejects_nested_api_key_in_request_json(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             request = root / "request.json"
-            request.write_text(json.dumps({"api_key": "secret"}), encoding="utf-8")
+            request.write_text(
+                json.dumps(
+                    {
+                        "model": "test-model",
+                        "stream": True,
+                        "metadata": {"api_key": "secret"},
+                    }
+                ),
+                encoding="utf-8",
+            )
             capture = root / "capture.jsonl"
             capture.write_text(
                 "\n".join(json.dumps(event) for event in self.events()) + "\n",
@@ -185,6 +195,54 @@ class InferenceEvidenceTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(InferenceEvidenceError, "must not contain"):
+                build_inference_bundle(
+                    capture_path=capture,
+                    request_path=request,
+                    evidence_dir=root / "bundle",
+                    provider="cerebras",
+                    model="test-model",
+                    project_sha="abc123",
+                )
+
+    def test_rejects_request_model_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request = root / "request.json"
+            request.write_text(
+                json.dumps({"model": "different-model", "stream": True}),
+                encoding="utf-8",
+            )
+            capture = root / "capture.jsonl"
+            capture.write_text(
+                "\n".join(json.dumps(event) for event in self.events()) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(InferenceEvidenceError, "must exactly match"):
+                build_inference_bundle(
+                    capture_path=capture,
+                    request_path=request,
+                    evidence_dir=root / "bundle",
+                    provider="cerebras",
+                    model="test-model",
+                    project_sha="abc123",
+                )
+
+    def test_rejects_non_streaming_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request = root / "request.json"
+            request.write_text(
+                json.dumps({"model": "test-model", "stream": False}),
+                encoding="utf-8",
+            )
+            capture = root / "capture.jsonl"
+            capture.write_text(
+                "\n".join(json.dumps(event) for event in self.events()) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(InferenceEvidenceError, "stream must be true"):
                 build_inference_bundle(
                     capture_path=capture,
                     request_path=request,
