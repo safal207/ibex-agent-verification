@@ -3,13 +3,17 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
 class EvidenceError(ValueError):
-    """Raised when an evidence bundle cannot be described safely."""
+    """Raised when an evidence bundle cannot be described or verified safely."""
+
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def sha256_file(path: Path) -> str:
@@ -110,6 +114,150 @@ def write_manifest(**kwargs: Any) -> dict[str, Any]:
         encoding="utf-8",
     )
     return manifest
+
+
+def _load_manifest(path: Path) -> dict[str, Any]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise EvidenceError(f"{path}: invalid JSON: {exc.msg}") from exc
+    except OSError as exc:
+        raise EvidenceError(f"cannot read evidence manifest {path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise EvidenceError("evidence manifest must be a JSON object")
+    if raw.get("schema_version") != 1:
+        raise EvidenceError("evidence manifest schema_version must be 1")
+    if not isinstance(raw.get("files"), list):
+        raise EvidenceError("evidence manifest files must be an array")
+    return raw
+
+
+def _manifest_relative_path(value: Any, *, index: int) -> PurePosixPath:
+    if not isinstance(value, str) or not value:
+        raise EvidenceError(f"manifest files[{index}].path must be a non-empty string")
+    if "\\" in value:
+        raise EvidenceError(
+            f"manifest files[{index}].path must use POSIX separators: {value!r}"
+        )
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or str(path) != value
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise EvidenceError(
+            f"manifest files[{index}].path must be canonical and relative: {value!r}"
+        )
+    return path
+
+
+def _manifest_non_negative_int(value: Any, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise EvidenceError(f"{field} must be a non-negative integer")
+    return value
+
+
+def verify_manifest(*, evidence_dir: Path, manifest_path: Path) -> dict[str, Any]:
+    """Verify that a bundle exactly matches its manifest inventory.
+
+    The manifest itself is intentionally excluded because it cannot contain a stable
+    hash of itself. Every other regular file must be listed exactly once. Symlinks and
+    paths that escape the evidence root are rejected rather than followed.
+    """
+
+    try:
+        root = evidence_dir.resolve(strict=True)
+    except OSError as exc:
+        raise EvidenceError(f"evidence directory does not exist: {evidence_dir}") from exc
+    if not root.is_dir():
+        raise EvidenceError(f"evidence directory is not a directory: {evidence_dir}")
+
+    if manifest_path.is_symlink():
+        raise EvidenceError(f"evidence manifest must not be a symlink: {manifest_path}")
+    try:
+        manifest = manifest_path.resolve(strict=True)
+    except OSError as exc:
+        raise EvidenceError(f"evidence manifest does not exist: {manifest_path}") from exc
+    if not manifest.is_file():
+        raise EvidenceError(f"evidence manifest is not a regular file: {manifest_path}")
+    if not manifest.is_relative_to(root):
+        raise EvidenceError("evidence manifest must be inside the evidence directory")
+
+    payload = _load_manifest(manifest)
+    entries = payload["files"]
+    listed: set[str] = set()
+    mismatches: list[dict[str, Any]] = []
+
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise EvidenceError(f"manifest files[{index}] must be an object")
+        relative = _manifest_relative_path(entry.get("path"), index=index)
+        relative_text = relative.as_posix()
+        if relative_text in listed:
+            raise EvidenceError(f"manifest contains duplicate path: {relative_text}")
+        listed.add(relative_text)
+
+        expected_size = _manifest_non_negative_int(
+            entry.get("size_bytes"), field=f"manifest files[{index}].size_bytes"
+        )
+        expected_sha = entry.get("sha256")
+        if not isinstance(expected_sha, str) or _SHA256_RE.fullmatch(expected_sha) is None:
+            raise EvidenceError(
+                f"manifest files[{index}].sha256 must be 64 lowercase hexadecimal characters"
+            )
+
+        candidate = root.joinpath(*relative.parts)
+        if candidate == manifest:
+            raise EvidenceError("evidence manifest cannot list itself")
+        if not candidate.exists():
+            mismatches.append({"path": relative_text, "problem": "MISSING"})
+            continue
+        if candidate.is_symlink() or not candidate.is_file():
+            raise EvidenceError(f"manifest path is not a regular file: {relative_text}")
+        resolved = candidate.resolve(strict=True)
+        if not resolved.is_relative_to(root):
+            raise EvidenceError(f"manifest path escapes evidence directory: {relative_text}")
+
+        actual_size = candidate.stat().st_size
+        actual_sha = sha256_file(candidate)
+        if actual_size != expected_size:
+            mismatches.append(
+                {
+                    "path": relative_text,
+                    "problem": "SIZE_MISMATCH",
+                    "expected": expected_size,
+                    "actual": actual_size,
+                }
+            )
+        if actual_sha != expected_sha:
+            mismatches.append(
+                {
+                    "path": relative_text,
+                    "problem": "SHA256_MISMATCH",
+                    "expected": expected_sha,
+                    "actual": actual_sha,
+                }
+            )
+
+    actual_files: set[str] = set()
+    for candidate in sorted(root.rglob("*")):
+        if candidate.is_symlink():
+            raise EvidenceError(
+                f"evidence bundle contains a symlink: {candidate.relative_to(root).as_posix()}"
+            )
+        if candidate.is_file() and candidate.resolve() != manifest:
+            actual_files.add(candidate.relative_to(root).as_posix())
+
+    unlisted = sorted(actual_files - listed)
+    for relative_text in unlisted:
+        mismatches.append({"path": relative_text, "problem": "UNLISTED"})
+
+    return {
+        "status": "VERIFIED" if not mismatches else "INTEGRITY_MISMATCH",
+        "schema_version": payload["schema_version"],
+        "files_checked": len(entries),
+        "mismatches": mismatches,
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:

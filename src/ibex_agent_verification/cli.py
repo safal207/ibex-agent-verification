@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .comparator import compare_traces
+from .evidence import EvidenceError, verify_manifest
 from .ibex_trace import (
     load_ibex_trace,
     write_architectural_jsonl,
@@ -23,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ibex-av",
         description=(
             "Parse official Ibex traces, compare architectural events, "
-            "analyze timing anomalies, and gate silicon changes."
+            "analyze timing anomalies, verify evidence bundles, and gate silicon changes."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -63,6 +64,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="baseline retirement gap used for timing output (default: 1)",
     )
     ibex_trace.add_argument("--report", help="optional parser summary JSON path")
+
+    verify_evidence = subparsers.add_parser(
+        "verify-evidence",
+        help="verify every manifest-listed file and reject unlisted bundle files",
+    )
+    verify_evidence.add_argument(
+        "--manifest", required=True, help="evidence manifest JSON path"
+    )
+    verify_evidence.add_argument(
+        "--evidence-dir",
+        help="bundle root; defaults to the manifest parent directory",
+    )
+    verify_evidence.add_argument(
+        "--report",
+        help="optional verification report outside the evidence directory",
+    )
 
     silicon_gate = subparsers.add_parser(
         "gate-silicon-change",
@@ -120,6 +137,21 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
             exit_code = 0
+        elif args.command == "verify-evidence":
+            manifest = Path(args.manifest)
+            evidence_dir = Path(args.evidence_dir) if args.evidence_dir else manifest.parent
+            evidence_root = evidence_dir.resolve(strict=True)
+            if args.report:
+                report = Path(args.report).resolve(strict=False)
+                if report.is_relative_to(evidence_root):
+                    raise EvidenceError(
+                        "verification report must be outside the evidence directory"
+                    )
+            payload = verify_manifest(
+                evidence_dir=evidence_dir,
+                manifest_path=manifest,
+            )
+            exit_code = 0 if payload["status"] == "VERIFIED" else 1
         elif args.command == "gate-silicon-change":
             payload = evaluate_gate(args.request)
             exit_code = {"ALLOW": 0, "BLOCK": 1, "ESCALATE": 3}[
@@ -127,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             ]
         else:
             return 2
-    except (TraceValidationError, GateInputError) as exc:
+    except (TraceValidationError, GateInputError, EvidenceError, OSError) as exc:
         payload = {"status": "INVALID_INPUT", "error": str(exc)}
         print(json.dumps(payload, indent=2), file=sys.stderr)
         return 2

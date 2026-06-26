@@ -2,12 +2,17 @@ import hashlib
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 
+from ibex_agent_verification.cli import main
 from ibex_agent_verification.evidence import (
     EvidenceError,
     build_manifest,
+    collect_files,
     parse_key_value_file,
+    verify_manifest,
     write_manifest,
 )
 
@@ -77,6 +82,153 @@ class EvidenceManifestTests(unittest.TestCase):
                     tool_versions_file=versions,
                     commands_file=commands,
                 )
+
+
+class EvidenceVerificationTests(unittest.TestCase):
+    def make_bundle(self, root: Path) -> Path:
+        (root / "logs").mkdir()
+        (root / "commands.sh").write_text("echo replay\n", encoding="utf-8")
+        (root / "logs" / "simulator.stdout").write_text("PASS\n", encoding="utf-8")
+        manifest_path = root / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "files": collect_files(root, manifest_path),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return manifest_path
+
+    def test_verifies_exact_manifest_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.make_bundle(root)
+            result = verify_manifest(evidence_dir=root, manifest_path=manifest)
+
+        self.assertEqual(result["status"], "VERIFIED")
+        self.assertEqual(result["files_checked"], 2)
+        self.assertEqual(result["mismatches"], [])
+
+    def test_reports_changed_file_without_hiding_other_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.make_bundle(root)
+            (root / "commands.sh").write_text("echo changed\n", encoding="utf-8")
+            result = verify_manifest(evidence_dir=root, manifest_path=manifest)
+
+        self.assertEqual(result["status"], "INTEGRITY_MISMATCH")
+        problems = {item["problem"] for item in result["mismatches"]}
+        self.assertIn("SIZE_MISMATCH", problems)
+        self.assertIn("SHA256_MISMATCH", problems)
+
+    def test_reports_unlisted_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.make_bundle(root)
+            (root / "late.log").write_text("not in manifest\n", encoding="utf-8")
+            result = verify_manifest(evidence_dir=root, manifest_path=manifest)
+
+        self.assertEqual(result["status"], "INTEGRITY_MISMATCH")
+        self.assertIn(
+            {"path": "late.log", "problem": "UNLISTED"}, result["mismatches"]
+        )
+
+    def test_rejects_path_escape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "files": [
+                            {
+                                "path": "../outside",
+                                "size_bytes": 0,
+                                "sha256": "0" * 64,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(EvidenceError, "canonical and relative"):
+                verify_manifest(evidence_dir=root, manifest_path=manifest)
+
+    def test_rejects_duplicate_manifest_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.make_bundle(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["files"].append(dict(payload["files"][0]))
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(EvidenceError, "duplicate path"):
+                verify_manifest(evidence_dir=root, manifest_path=manifest)
+
+    def test_rejects_manifest_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.make_bundle(root)
+            linked_manifest = root / "linked-manifest.json"
+            linked_manifest.symlink_to(manifest.name)
+            with self.assertRaisesRegex(EvidenceError, "must not be a symlink"):
+                verify_manifest(evidence_dir=root, manifest_path=linked_manifest)
+
+    def test_cli_exit_codes_and_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.make_bundle(root)
+            report = root.parent / f"{root.name}-verification.json"
+            with redirect_stdout(StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "verify-evidence",
+                            "--manifest",
+                            str(manifest),
+                            "--report",
+                            str(report),
+                        ]
+                    ),
+                    0,
+                )
+            self.assertEqual(json.loads(report.read_text())["status"], "VERIFIED")
+
+            (root / "commands.sh").write_text("tampered\n", encoding="utf-8")
+            with redirect_stdout(StringIO()):
+                self.assertEqual(
+                    main(["verify-evidence", "--manifest", str(manifest)]), 1
+                )
+
+            manifest.write_text("{}\n", encoding="utf-8")
+            with redirect_stderr(StringIO()):
+                self.assertEqual(
+                    main(["verify-evidence", "--manifest", str(manifest)]), 2
+                )
+
+    def test_cli_rejects_report_inside_evidence_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.make_bundle(root)
+            report = root / "verification-report.json"
+            with redirect_stderr(StringIO()):
+                exit_code = main(
+                    [
+                        "verify-evidence",
+                        "--manifest",
+                        str(manifest),
+                        "--report",
+                        str(report),
+                    ]
+                )
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(report.exists())
 
 
 if __name__ == "__main__":

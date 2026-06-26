@@ -17,6 +17,16 @@ A result can be labeled `MISMATCH` only when all required evidence is present.
 - normalized traces
 - comparator report
 
+## Bundle verification
+
+After downloading an evidence directory, verify it before reading its reports:
+
+```bash
+ibex-av verify-evidence --manifest artifacts/ibex-e2e/manifest.json
+```
+
+The command checks manifest paths, file sizes, SHA-256 values, and the complete file inventory. See [Evidence Bundle Verification](EVIDENCE_BUNDLE_VERIFICATION.md).
+
 ## Result states
 
 - `MATCH`: all normalized events match.

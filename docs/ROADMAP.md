@@ -35,8 +35,9 @@
 - ✅ preserve raw trace, counters, stdout, stderr, commands, versions, configuration, ELF, and hashes
 - ✅ generate normalized evidence and a SHA-256 manifest
 - ✅ confirm hosted runs and independently rehash manifest-listed files
+- ✅ provide a fail-closed manifest verifier and run it before artifact upload
 
-See [Hosted Ibex Verilator E2E Evidence](HOSTED_E2E_EVIDENCE_2026-06-24.md).
+See [Hosted Ibex Verilator E2E Evidence](HOSTED_E2E_EVIDENCE_2026-06-24.md) and [Evidence Bundle Verification](EVIDENCE_BUNDLE_VERIFICATION.md).
 
 ## Phase 1C — causal timing signal adapter 🧪
 

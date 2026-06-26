@@ -66,6 +66,13 @@ jobs:
       - name: Run pinned Ibex simulation and build evidence
         run: bash ./scripts/run_ibex_e2e.sh
 
+      - name: Verify evidence bundle integrity
+        run: |
+          ibex-av verify-evidence \
+            --manifest "$EVIDENCE_DIR/manifest.json" \
+            --report "$RUNNER_TEMP/evidence-verification.json"
+          python -m json.tool "$RUNNER_TEMP/evidence-verification.json"
+
       - name: Show evidence summary
         if: always()
         run: |

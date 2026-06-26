@@ -11,7 +11,7 @@
 
 Hardware verification produces large traces, failing programs, waveforms, logs, and configuration details. AI coding agents can help generate tests and reduce failures, but only if the evidence path stays deterministic and reviewable.
 
-This repository currently provides seven narrow capabilities:
+This repository currently provides eight narrow capabilities:
 
 1. run a pinned Ibex Simple System experiment under Verilator;
 2. parse the official human-readable Ibex instruction trace into normalized evidence;
@@ -19,7 +19,8 @@ This repository currently provides seven narrow capabilities:
 4. align waveform evidence with adjacent instruction-retirement gaps;
 5. compare architectural execution events with an expected trace;
 6. detect cycle deviations and rank evidence-backed timing causes;
-7. emit machine-readable reports and reproducible evidence bundles.
+7. emit machine-readable reports and reproducible evidence bundles;
+8. independently verify a downloaded bundle's manifest inventory, sizes, and SHA-256 values.
 
 ## Status — read this first
 
@@ -31,6 +32,7 @@ This is an **early, honest prototype**.
 - A pinned Verilator E2E workflow builds and runs upstream `hello_test` and preserves raw and normalized evidence.
 - The first successful hosted E2E run completed on 2026-06-24; its manifest, artifact digest, trace counts, and integrity verification are recorded in [Hosted Ibex Verilator E2E Evidence](docs/HOSTED_E2E_EVIDENCE_2026-06-24.md).
 - The first hosted causal-waveform run also completed on 2026-06-24. It aligned all `1204/1204` retirements, preserved the FST, classified `385` delayed observations as `MEMORY_WAIT` and `6` as `INTERRUPT_SERVICE`, and left `489` as `UNKNOWN`. See [Hosted Causal Waveform E2E Evidence](docs/HOSTED_CAUSAL_E2E_EVIDENCE_2026-06-24.md).
+- Evidence manifests can be independently checked with `ibex-av verify-evidence`; malformed paths, symlinks, missing or modified files, and unlisted additions fail closed.
 - Instruction-fetch scoring, branch redirects, pipeline hazards, a reference ISA oracle, generated programs, and failure minimization remain roadmap items.
 - No benchmark, coverage, silicon-signoff, or bug-finding performance claim is made.
 
@@ -61,6 +63,11 @@ ibex-av compare \
   --expected examples/traces/expected.jsonl \
   --actual examples/traces/actual_pass.jsonl \
   --report artifacts/pass-report.json
+
+# Independently verify a generated or downloaded evidence bundle
+ibex-av verify-evidence \
+  --manifest artifacts/ibex-e2e/manifest.json \
+  --report artifacts/ibex-e2e-verification.json
 ```
 
 Run local deterministic tests and fixtures:
@@ -108,7 +115,7 @@ The GitHub Actions job uploads `artifacts/ibex-e2e/` even when a later step fail
 
 The first confirmed architectural hosted run parsed `1204` instructions and preserved `32` manifest-listed files. The first causal hosted run preserved `39` manifest-listed files, including the raw FST and causal reports; every listed SHA-256 was independently verified.
 
-See [Pinned Ibex Verilator E2E Run](docs/IBEX_VERILATOR_E2E.md), [Hosted Ibex Verilator E2E Evidence](docs/HOSTED_E2E_EVIDENCE_2026-06-24.md), and [Hosted Causal Waveform E2E Evidence](docs/HOSTED_CAUSAL_E2E_EVIDENCE_2026-06-24.md).
+See [Pinned Ibex Verilator E2E Run](docs/IBEX_VERILATOR_E2E.md), [Hosted Ibex Verilator E2E Evidence](docs/HOSTED_E2E_EVIDENCE_2026-06-24.md), [Hosted Causal Waveform E2E Evidence](docs/HOSTED_CAUSAL_E2E_EVIDENCE_2026-06-24.md), and [Evidence Bundle Verification](docs/EVIDENCE_BUNDLE_VERIFICATION.md).
 
 ## Official Ibex trace adapter
 
@@ -181,6 +188,7 @@ Confidence is a deterministic rule score, **not** a statistical probability. A c
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── CAUSAL_WAVEFORM_ADAPTER.md
+│   ├── EVIDENCE_BUNDLE_VERIFICATION.md
 │   ├── HOSTED_CAUSAL_E2E_EVIDENCE_2026-06-24.md
 │   ├── HOSTED_E2E_EVIDENCE_2026-06-24.md
 │   ├── IBEX_TRACE_ADAPTER.md
