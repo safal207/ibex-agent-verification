@@ -169,11 +169,23 @@ class QACompletionBudgetTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(summary["tasks_truncated"], 5)
         self.assertEqual(summary["tasks_invalid"], 5)
+        self.assertEqual(summary["tasks_completed"], 0)
         self.assertEqual(summary["tasks_passed"], 0)
         self.assertEqual(summary["tasks_failed"], 0)
         self.assertEqual(summary["score"]["earned"], 0)
         self.assertEqual(summary["score"]["possible"], 29)
         self.assertEqual(summary["score"]["percent"], 0.0)
+
+        self.assertEqual(summary["scorecard_version"], 2)
+        scorecard = summary["scorecard"]
+        self.assertEqual(scorecard["end_to_end_score"]["earned"], 0)
+        self.assertEqual(scorecard["end_to_end_score"]["possible"], 29)
+        self.assertEqual(scorecard["completion_reliability"]["completed"], 0)
+        self.assertEqual(scorecard["completion_reliability"]["percent"], 0.0)
+        self.assertIsNone(scorecard["answer_correctness"]["percent"])
+        self.assertEqual(scorecard["provider_reliability"]["unknown"], 5)
+        self.assertIsNone(scorecard["provider_reliability"]["percent"])
+        self.assertEqual(scorecard["outcomes"]["output_truncated"], 5)
 
 
 if __name__ == "__main__":

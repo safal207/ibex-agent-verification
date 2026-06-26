@@ -8,11 +8,13 @@ on:
       - ".github/workflows/qa-model-verification.yml"
       - "benchmarks/*.json"
       - "src/ibex_agent_verification/qa_benchmark.py"
+      - "src/ibex_agent_verification/qa_scorecard.py"
       - "scripts/qa_benchmark.py"
       - "scripts/build_qa_benchmark_bundle.py"
       - "scripts/build_qa_workflow_matrix.py"
       - "tests/test_qa_benchmark*.py"
       - "tests/test_qa_completion_budget.py"
+      - "tests/test_qa_scorecard.py"
       - "tests/test_qa_suite_catalog.py"
       - "docs/AI_QA_ENGINEER_SUITE.md"
       - "docs/MOBILE_QA_SUITE.md"
@@ -21,11 +23,13 @@ on:
       - ".github/workflows/qa-model-verification.yml"
       - "benchmarks/*.json"
       - "src/ibex_agent_verification/qa_benchmark.py"
+      - "src/ibex_agent_verification/qa_scorecard.py"
       - "scripts/qa_benchmark.py"
       - "scripts/build_qa_benchmark_bundle.py"
       - "scripts/build_qa_workflow_matrix.py"
       - "tests/test_qa_benchmark*.py"
       - "tests/test_qa_completion_budget.py"
+      - "tests/test_qa_scorecard.py"
       - "tests/test_qa_suite_catalog.py"
       - "docs/AI_QA_ENGINEER_SUITE.md"
       - "docs/MOBILE_QA_SUITE.md"
@@ -303,18 +307,36 @@ jobs:
           if not summary_path.is_file():
               raise SystemExit(0)
           report = json.loads(summary_path.read_text(encoding="utf-8"))
+          scorecard = report["scorecard"]
+          end_to_end = scorecard["end_to_end_score"]
+          correctness = scorecard["answer_correctness"]
+          completion = scorecard["completion_reliability"]
+          provider = scorecard["provider_reliability"]
+          outcomes = scorecard["outcomes"]
+
+          def percent(value):
+              return "n/a" if value is None else f"{value}%"
+
           lines = [
               f"## {report['title']} — {report['model']}",
               "",
               f"- Suite: `{report['suite_id']}`",
-              f"- Score: `{report['score']['earned']}/{report['score']['possible']}` "
-              f"(`{report['score']['percent']}%`)",
-              f"- Perfect tasks: `{report['tasks_passed']}/{report['tasks_total']}`",
-              f"- Failed tasks: `{report['tasks_failed']}`",
-              f"- Invalid/inference failures: `{report['tasks_invalid']}`",
-              f"- Output-truncated tasks: `{report.get('tasks_truncated', 0)}`",
+              f"- End-to-end score: `{end_to_end['earned']}/{end_to_end['possible']}` "
+              f"(`{percent(end_to_end['percent'])}`)",
+              f"- Answer correctness: `{correctness['earned']}/{correctness['possible']}` "
+              f"(`{percent(correctness['percent'])}` across "
+              f"`{correctness['tasks_evaluated']}` completed tasks)",
+              f"- Completion reliability: `{completion['completed']}/{completion['total']}` "
+              f"(`{percent(completion['percent'])}`)",
+              f"- Provider reliability: `{provider['successful']}/{provider['observed']}` "
+              f"known outcomes (`{percent(provider['percent'])}`); "
+              f"failed=`{provider['failed']}`, unknown=`{provider['unknown']}`",
+              f"- Outcomes: pass=`{outcomes['pass']}`, fail=`{outcomes['fail']}`, "
+              f"invalid=`{outcomes['invalid_response']}`, "
+              f"truncated=`{outcomes['output_truncated']}`, "
+              f"inference_failed=`{outcomes['inference_failed']}`",
               "",
-              "| Category | Score |",
+              "| Category | End-to-end score |",
               "|---|---:|",
           ]
           for category, score in sorted(report["categories"].items()):
@@ -322,10 +344,16 @@ jobs:
                   f"| `{category}` | {score['earned']}/{score['possible']} "
                   f"({score['percent']}%) |"
               )
+          if provider["failure_classes"]:
+              lines.extend(["", "Provider failure classes:"])
+              for failure_class, count in provider["failure_classes"].items():
+                  lines.append(f"- `{failure_class}`: `{count}`")
           lines.extend(
               [
                   "",
-                  f"Claim boundary: {report['claim_boundary']}",
+                  f"Scorecard boundary: {scorecard['claim_boundary']}",
+                  "",
+                  f"Suite boundary: {report['claim_boundary']}",
                   "",
               ]
           )

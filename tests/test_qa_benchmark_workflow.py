@@ -40,6 +40,16 @@ class QABenchmarkWorkflowTests(unittest.TestCase):
         self.assertNotIn("actions/setup-python@v", WORKFLOW)
         self.assertNotIn("actions/upload-artifact@v", WORKFLOW)
 
+    def test_scorecard_code_and_tests_trigger_workflow(self):
+        self.assertEqual(
+            WORKFLOW.count('      - "src/ibex_agent_verification/qa_scorecard.py"'),
+            2,
+        )
+        self.assertEqual(
+            WORKFLOW.count('      - "tests/test_qa_scorecard.py"'),
+            2,
+        )
+
     def test_live_pull_request_mode_is_explicit_and_same_repo_only(self):
         self.assertIn("  pull_request:", WORKFLOW)
         self.assertIn(
@@ -130,6 +140,19 @@ class QABenchmarkWorkflowTests(unittest.TestCase):
         self.assertNotIn("tasks_passed ==", WORKFLOW)
         self.assertIn("inference_exit_code", WORKFLOW)
         self.assertIn("scripts/qa_benchmark.py summarize", WORKFLOW)
+
+    def test_actions_summary_separates_three_reliability_axes(self):
+        publish = WORKFLOW.index("Publish suite and model scorecard to Actions summary")
+        upload = WORKFLOW.index("Upload suite and model scoped QA evidence")
+        self.assertLess(publish, upload)
+        self.assertIn('scorecard = report["scorecard"]', WORKFLOW)
+        self.assertIn('scorecard["end_to_end_score"]', WORKFLOW)
+        self.assertIn('scorecard["answer_correctness"]', WORKFLOW)
+        self.assertIn('scorecard["completion_reliability"]', WORKFLOW)
+        self.assertIn('scorecard["provider_reliability"]', WORKFLOW)
+        self.assertIn("Provider failure classes:", WORKFLOW)
+        self.assertIn("Scorecard boundary:", WORKFLOW)
+        self.assertNotIn("- Score: `", WORKFLOW)
 
     def test_outer_manifest_covers_scores_and_is_independently_verified(self):
         build = WORKFLOW.index("Build and independently verify outer benchmark manifest")
