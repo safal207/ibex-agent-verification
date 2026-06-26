@@ -78,6 +78,19 @@ def _find_sensitive_key(value: Any, *, path: str = "$") -> str | None:
     return None
 
 
+def _validate_evidence_dir(path: Path) -> None:
+    if not path.exists():
+        return
+    if path.is_symlink() or not path.is_dir():
+        raise CerebrasRunnerError(
+            f"evidence directory must be a real directory: {path}"
+        )
+    if any(path.iterdir()):
+        raise CerebrasRunnerError(
+            f"evidence directory must be empty or absent: {path}"
+        )
+
+
 def _load_official_sdk() -> tuple[Callable[..., Any], str]:
     try:
         from cerebras.cloud.sdk import Cerebras
@@ -291,6 +304,11 @@ def run_cerebras_inference(
         raise CerebrasRunnerError("timeout_seconds must be a finite positive number")
     if timeout_seconds <= 0:
         raise CerebrasRunnerError("timeout_seconds must be a finite positive number")
+    if not model.strip():
+        raise CerebrasRunnerError("model must be a non-empty string")
+    if not project_sha.strip():
+        raise CerebrasRunnerError("project_sha must be a non-empty string")
+    _validate_evidence_dir(evidence_dir)
 
     request_payload = _load_request(request_path, model=model)
     environment = os.environ if environ is None else environ
