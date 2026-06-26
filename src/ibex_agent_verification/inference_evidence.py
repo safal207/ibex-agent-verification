@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ _ALLOWED_EVENTS = {
 }
 _TERMINAL_EVENTS = {"request_end", "request_error"}
 _SENSITIVE_KEYS = {"authorization", "api_key", "api-key", "x-api-key"}
+_PROVIDER_TIME_KEYS = ("queue_time", "prompt_time", "completion_time", "total_time")
 
 
 def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
@@ -158,6 +160,53 @@ def _usage_from_payload(payload: dict[str, Any]) -> dict[str, int] | None:
     return normalized
 
 
+def _reasoning_tokens_from_payload(payload: dict[str, Any]) -> int | None:
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    details = usage.get("completion_tokens_details")
+    if details is None:
+        return None
+    if not isinstance(details, dict):
+        raise InferenceEvidenceError(
+            "chunk usage.completion_tokens_details must be an object when present"
+        )
+    value = details.get("reasoning_tokens")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise InferenceEvidenceError(
+            "chunk usage.completion_tokens_details.reasoning_tokens must be a "
+            "non-negative integer"
+        )
+    return value
+
+
+def _provider_time_info_from_payload(payload: dict[str, Any]) -> dict[str, float] | None:
+    raw = payload.get("time_info")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise InferenceEvidenceError("chunk time_info must be an object when present")
+
+    normalized: dict[str, float] = {}
+    for key in _PROVIDER_TIME_KEYS:
+        value = raw.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise InferenceEvidenceError(
+                f"chunk time_info.{key} must be a finite non-negative number"
+            )
+        number = float(value)
+        if not math.isfinite(number) or number < 0:
+            raise InferenceEvidenceError(
+                f"chunk time_info.{key} must be a finite non-negative number"
+            )
+        normalized[key] = number
+    return normalized or None
+
+
 def analyze_capture(
     events: Iterable[dict[str, Any]], *, provider: str, model: str
 ) -> dict[str, Any]:
@@ -194,6 +243,8 @@ def analyze_capture(
     status_code: int | None = None
     first_output_ns: int | None = None
     usage: dict[str, int] | None = None
+    reasoning_tokens: int | None = None
+    provider_time_info: dict[str, float] | None = None
     output_parts: list[str] = []
     error: str | None = None
 
@@ -218,11 +269,31 @@ def analyze_capture(
             if first_output_ns is None and _chunk_has_output(payload):
                 first_output_ns = timestamp
             output_parts.append(_chunk_text(payload))
+
             chunk_usage = _usage_from_payload(payload)
             if chunk_usage is not None:
                 if usage is not None and usage != chunk_usage:
                     raise InferenceEvidenceError("capture contains conflicting usage objects")
                 usage = chunk_usage
+
+            chunk_reasoning_tokens = _reasoning_tokens_from_payload(payload)
+            if chunk_reasoning_tokens is not None:
+                if (
+                    reasoning_tokens is not None
+                    and reasoning_tokens != chunk_reasoning_tokens
+                ):
+                    raise InferenceEvidenceError(
+                        "capture contains conflicting reasoning token counts"
+                    )
+                reasoning_tokens = chunk_reasoning_tokens
+
+            chunk_time_info = _provider_time_info_from_payload(payload)
+            if chunk_time_info is not None:
+                if provider_time_info is not None and provider_time_info != chunk_time_info:
+                    raise InferenceEvidenceError(
+                        "capture contains conflicting provider time_info objects"
+                    )
+                provider_time_info = chunk_time_info
         elif event_type == "request_error":
             value = event.get("error")
             if not isinstance(value, str) or not value.strip():
@@ -236,8 +307,27 @@ def analyze_capture(
     )
     completion_tokens = None if usage is None else usage["completion_tokens"]
     output_tokens_per_second: float | None = None
-    if completion_tokens is not None and generation_ns is not None and generation_ns > 0:
+    throughput_source: str | None = None
+    unavailable_reason: str | None = None
+
+    provider_completion_seconds = (
+        None
+        if provider_time_info is None
+        else provider_time_info.get("completion_time")
+    )
+    if completion_tokens is not None and provider_completion_seconds is not None:
+        if completion_tokens > 0 and provider_completion_seconds <= 0:
+            raise InferenceEvidenceError(
+                "provider completion_time must be positive when completion_tokens is positive"
+            )
+        if provider_completion_seconds > 0:
+            output_tokens_per_second = completion_tokens / provider_completion_seconds
+            throughput_source = "provider_usage_and_time_info"
+    elif completion_tokens is not None and reasoning_tokens not in (None, 0):
+        unavailable_reason = "reasoning_tokens_without_provider_completion_time"
+    elif completion_tokens is not None and generation_ns is not None and generation_ns > 0:
         output_tokens_per_second = completion_tokens / (generation_ns / 1_000_000_000)
+        throughput_source = "provider_usage"
 
     output_text = "".join(output_parts)
     request_succeeded = (
@@ -245,6 +335,9 @@ def analyze_capture(
         and status_code is not None
         and 200 <= status_code < 300
     )
+    usage_result: dict[str, int] | None = None if usage is None else dict(usage)
+    if usage_result is not None and reasoning_tokens is not None:
+        usage_result["reasoning_tokens"] = reasoning_tokens
 
     return {
         "schema_version": 1,
@@ -258,12 +351,14 @@ def analyze_capture(
             "duration_ms": duration_ns / 1_000_000,
             "time_to_first_output_ms": None if ttft_ns is None else ttft_ns / 1_000_000,
             "generation_ms": None if generation_ns is None else generation_ns / 1_000_000,
+            "provider_reported_seconds": provider_time_info,
         },
-        "usage": usage,
+        "usage": usage_result,
         "throughput": {
             "output_tokens_per_second": output_tokens_per_second,
-            "source": "provider_usage" if usage is not None else None,
+            "source": throughput_source,
             "estimated": False,
+            "unavailable_reason": unavailable_reason,
         },
         "output": {
             "text_characters": len(output_text),
@@ -271,8 +366,9 @@ def analyze_capture(
         },
         "claim_boundary": (
             "This report verifies a recorded OpenAI-compatible API interaction and its "
-            "derived timing metrics. It does not verify provider hardware, internal RTL, "
-            "model quality, energy efficiency, or an independent tokens-per-second claim."
+            "client-observed and provider-reported timing metrics. It does not verify "
+            "provider hardware, internal RTL, model quality, energy efficiency, or a "
+            "vendor-wide tokens-per-second claim."
         ),
     }
 
@@ -357,6 +453,7 @@ def build_inference_bundle(
             "output_tokens_per_second": analysis["throughput"][
                 "output_tokens_per_second"
             ],
+            "throughput_source": analysis["throughput"]["source"],
         },
         "claim_boundary": analysis["claim_boundary"],
         "files": collect_files(evidence_dir, manifest_path),
