@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: cerebras-live-evidence
@@ -121,26 +120,118 @@ jobs:
           for path in Path("artifacts").rglob("*"):
               if path.is_file() and secret in path.read_bytes():
                   raise SystemExit(f"credential value persisted in artifact: {path}")
+          PY
 
-          timing = json.loads(
-              (evidence / "analysis.json").read_text(encoding="utf-8")
-          )["timing"]
-          print(
-              json.dumps(
+      - name: Write sanitized Actions summary and receipt
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = Path(os.environ["EVIDENCE_DIR"])
+          manifest_path = evidence / "manifest.json"
+          analysis_path = evidence / "analysis.json"
+
+          receipt = {
+              "run_url": (
+                  f"{os.environ['GITHUB_SERVER_URL']}/"
+                  f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+                  f"{os.environ['GITHUB_RUN_ID']}"
+              ),
+              "commit": os.environ["GITHUB_SHA"],
+              "status": "NO_MANIFEST",
+              "model": os.environ["CEREBRAS_MODEL"],
+              "http_status": None,
+              "time_to_first_output_ms": None,
+              "output_tokens_per_second": None,
+              "throughput_source": None,
+              "provider_completion_time_seconds": None,
+              "sdk_version": None,
+          }
+
+          if manifest_path.is_file():
+              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+              result = manifest.get("result", {})
+              receipt.update(
                   {
-                      "status": result["status"],
-                      "model": manifest["workload"]["model"],
-                      "http_status": result["http_status"],
-                      "time_to_first_output_ms": timing["time_to_first_output_ms"],
-                      "output_tokens_per_second": result[
+                      "status": result.get("status", "UNKNOWN"),
+                      "model": manifest.get("workload", {}).get(
+                          "model", receipt["model"]
+                      ),
+                      "http_status": result.get("http_status"),
+                      "time_to_first_output_ms": result.get(
+                          "time_to_first_output_ms"
+                      ),
+                      "output_tokens_per_second": result.get(
                           "output_tokens_per_second"
-                      ],
-                      "sdk_version": manifest["runner"]["sdk"]["version"],
-                  },
-                  indent=2,
-                  sort_keys=True,
+                      ),
+                      "throughput_source": result.get("throughput_source"),
+                      "sdk_version": manifest.get("runner", {})
+                      .get("sdk", {})
+                      .get("version"),
+                  }
               )
+
+          if analysis_path.is_file():
+              analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+              provider_timing = (
+                  analysis.get("timing", {}).get("provider_reported_seconds") or {}
+              )
+              receipt["provider_completion_time_seconds"] = provider_timing.get(
+                  "completion_time"
+              )
+
+          artifacts = Path("artifacts")
+          artifacts.mkdir(exist_ok=True)
+          receipt_json = artifacts / "cerebras-live-receipt.json"
+          receipt_json.write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
           )
+
+          def render(value):
+              return "n/a" if value is None else str(value)
+
+          icon = "✅" if receipt["status"] == "COMPLETE" else "❌"
+          markdown = "\n".join(
+              [
+                  f"## {icon} Cerebras live evidence",
+                  "",
+                  f"- Run: {receipt['run_url']}",
+                  f"- Commit: `{receipt['commit']}`",
+                  f"- Status: `{receipt['status']}`",
+                  f"- Model: `{receipt['model']}`",
+                  f"- HTTP status: `{render(receipt['http_status'])}`",
+                  f"- TTFT: `{render(receipt['time_to_first_output_ms'])} ms`",
+                  (
+                      "- Output throughput: "
+                      f"`{render(receipt['output_tokens_per_second'])} tokens/s`"
+                  ),
+                  f"- Throughput source: `{render(receipt['throughput_source'])}`",
+                  (
+                      "- Provider completion time: "
+                      f"`{render(receipt['provider_completion_time_seconds'])} s`"
+                  ),
+                  f"- SDK version: `{render(receipt['sdk_version'])}`",
+                  "",
+                  (
+                      "Claim boundary: one client-observed API stream and bundle "
+                      "integrity; no internal hardware or RTL claim."
+                  ),
+                  "",
+              ]
+          )
+          (artifacts / "cerebras-live-receipt.md").write_text(
+              markdown, encoding="utf-8"
+          )
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open(
+              "a", encoding="utf-8"
+          ) as summary:
+              summary.write(markdown)
+          print(markdown)
           PY
 
       - name: Upload Cerebras evidence and verification reports
@@ -153,65 +244,7 @@ jobs:
             artifacts/cerebras-live-request.json
             artifacts/cerebras-live-run-report.json
             artifacts/cerebras-live-verification.json
+            artifacts/cerebras-live-receipt.json
+            artifacts/cerebras-live-receipt.md
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Publish sanitized run receipt
-        if: always()
-        uses: actions/github-script@v7
-        env:
-          RECEIPT_EVIDENCE_DIR: ${{ env.EVIDENCE_DIR }}
-        with:
-          script: |
-            const fs = require("fs");
-            const path = require("path");
-
-            const evidenceDir = process.env.RECEIPT_EVIDENCE_DIR;
-            const manifestPath = path.join(evidenceDir, "manifest.json");
-            const analysisPath = path.join(evidenceDir, "analysis.json");
-
-            let status = "NO_MANIFEST";
-            let model = process.env.CEREBRAS_MODEL;
-            let httpStatus = null;
-            let ttftMs = null;
-            let tokensPerSecond = null;
-            let sdkVersion = null;
-
-            if (fs.existsSync(manifestPath)) {
-              const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-              status = manifest.result?.status ?? "UNKNOWN";
-              model = manifest.workload?.model ?? model;
-              httpStatus = manifest.result?.http_status ?? null;
-              tokensPerSecond = manifest.result?.output_tokens_per_second ?? null;
-              sdkVersion = manifest.runner?.sdk?.version ?? null;
-            }
-            if (fs.existsSync(analysisPath)) {
-              const analysis = JSON.parse(fs.readFileSync(analysisPath, "utf8"));
-              ttftMs = analysis.timing?.time_to_first_output_ms ?? null;
-            }
-
-            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
-            const icon = status === "COMPLETE" ? "✅" : "❌";
-            const render = (value) => value === null ? "n/a" : String(value);
-            const body = [
-              `## ${icon} Cerebras live evidence receipt`,
-              "",
-              `- Run: ${runUrl}`,
-              `- Commit: \`${context.sha}\``,
-              `- Status: \`${status}\``,
-              `- Model: \`${model}\``,
-              `- HTTP status: \`${render(httpStatus)}\``,
-              `- TTFT: \`${render(ttftMs)} ms\``,
-              `- Output throughput: \`${render(tokensPerSecond)} tokens/s\``,
-              `- SDK version: \`${render(sdkVersion)}\``,
-              `- Artifact: \`cerebras-live-evidence-${context.sha}\``,
-              "",
-              "Claim boundary: this records one client-observed API stream and bundle integrity; it does not verify internal hardware or RTL.",
-            ].join("\n");
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 19,
-              body,
-            });
