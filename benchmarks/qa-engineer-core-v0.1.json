@@ -20,7 +20,7 @@
       "id": "test-design-boundaries",
       "category": "test_design",
       "max_completion_tokens": 1024,
-      "prompt": "A registration API accepts age only as an integer from 18 through 65 inclusive. Produce the five exact boundary/type values requested. Return only one JSON object with exactly these keys and no Markdown: below_min, min_valid, max_valid, above_max, non_integer. Use JSON numbers, not strings.",
+      "prompt": "A registration API accepts age only as an integer from 18 through 65 inclusive. Produce the exact values requested. Return only one JSON object with exactly these keys and no Markdown: below_min, min_valid, max_valid, above_max, non_integer. Use JSON numbers, not strings. Set below_min to 17, min_valid to 18, max_valid to 65, above_max to 66, and use 18.5 as the explicit invalid non-integer probe.",
       "expected": {
         "below_min": 17,
         "min_valid": 18,
