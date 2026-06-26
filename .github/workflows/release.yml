@@ -8,6 +8,7 @@ on:
       - "docs/releases/**"
       - "docs/evidence/releases/**"
       - "scripts/build_release_evidence_asset.py"
+      - "scripts/verify_release_asset_copy.py"
   workflow_run:
     workflows: ["CI"]
     types: [completed]
@@ -57,8 +58,9 @@ jobs:
           if [[ -d "$source" ]]; then
             python scripts/build_release_evidence_asset.py --source "$source" --output "$first"
             python scripts/build_release_evidence_asset.py --source "$source" --output "$second"
-            cmp "$first" "$second"
-            sha256sum "$first"
+            python scripts/verify_release_asset_copy.py \
+              --expected "$first" \
+              --actual "$second"
           fi
 
           echo "Validated release candidate $tag"
@@ -133,13 +135,16 @@ jobs:
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "actual_sha=$actual_sha" >> "$GITHUB_OUTPUT"
             if [[ "$actual_sha" == "$CURRENT_SHA" ]]; then
-              echo "::notice::Release tag $TAG already points to this commit; nothing to publish."
+              echo "same_commit=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::Release tag $TAG already points to this commit; verifying the existing release."
             else
+              echo "same_commit=false" >> "$GITHUB_OUTPUT"
               echo "::notice::Release tag $TAG already exists at $actual_sha; current commit is $CURRENT_SHA. Version was not bumped, so publishing is a successful no-op."
             fi
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "actual_sha=" >> "$GITHUB_OUTPUT"
+            echo "same_commit=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish GitHub Release
@@ -166,8 +171,10 @@ jobs:
           fi
           gh release create "${args[@]}"
 
-      - name: Verify newly published release
-        if: steps.existing.outputs.exists == 'false'
+      - name: Verify release and downloaded asset
+        if: >-
+          steps.existing.outputs.exists == 'false' ||
+          steps.existing.outputs.same_commit == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
@@ -181,14 +188,41 @@ jobs:
           [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')" == "false" ]]
           actual_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')"
           [[ "$actual_sha" == "$EXPECTED_SHA" ]]
+
           if [[ -n "$ASSET" ]]; then
             asset_name="$(basename "$ASSET")"
-            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fx "$asset_name"
+            gh release view "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name' | grep -Fx "$asset_name"
+
+            download_dir="$(mktemp -d)"
+            downloaded_asset="$download_dir/$asset_name"
+            verification_report="artifacts/${TAG}-release-asset-verification.json"
+            gh release download "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "$asset_name" \
+              --dir "$download_dir"
+            python scripts/verify_release_asset_copy.py \
+              --expected "$ASSET" \
+              --actual "$downloaded_asset" \
+              --report "$verification_report"
+
+            {
+              echo "### Release asset integrity"
+              echo
+              echo '```json'
+              cat "$verification_report"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
+
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,url,targetCommitish,assets
 
-      - name: Verify existing release is readable
-        if: steps.existing.outputs.exists == 'true'
+      - name: Verify existing older release is readable
+        if: >-
+          steps.existing.outputs.exists == 'true' &&
+          steps.existing.outputs.same_commit == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
