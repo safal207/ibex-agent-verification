@@ -1,8 +1,12 @@
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
+from ibex_agent_verification.cli import main
+from ibex_agent_verification.evidence import verify_manifest
 from ibex_agent_verification.inference_evidence import (
     InferenceEvidenceError,
     analyze_capture,
@@ -39,6 +43,24 @@ class InferenceEvidenceTests(unittest.TestCase):
             },
             {"event": "request_end", "monotonic_ns": 1_500_000_000},
         ]
+
+    def write_inputs(self, root: Path) -> tuple[Path, Path]:
+        request = root / "request.json"
+        request.write_text(
+            json.dumps(
+                {
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        capture = root / "capture.jsonl"
+        capture.write_text(
+            "\n".join(json.dumps(event) for event in self.events()) + "\n",
+            encoding="utf-8",
+        )
+        return request, capture
 
     def test_computes_only_provider_reported_token_throughput(self):
         result = analyze_capture(self.events(), provider="cerebras", model="test-model")
@@ -84,24 +106,10 @@ class InferenceEvidenceTests(unittest.TestCase):
         self.assertEqual(result["error"], "timeout")
         self.assertIsNone(result["http_status"])
 
-    def test_builds_bundle_without_secrets(self):
+    def test_builds_and_independently_verifies_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            request = root / "request.json"
-            request.write_text(
-                json.dumps(
-                    {
-                        "model": "test-model",
-                        "messages": [{"role": "user", "content": "hi"}],
-                    }
-                ),
-                encoding="utf-8",
-            )
-            capture = root / "capture.jsonl"
-            capture.write_text(
-                "\n".join(json.dumps(event) for event in self.events()) + "\n",
-                encoding="utf-8",
-            )
+            request, capture = self.write_inputs(root)
             evidence = root / "bundle"
 
             manifest = build_inference_bundle(
@@ -112,6 +120,10 @@ class InferenceEvidenceTests(unittest.TestCase):
                 model="test-model",
                 project_sha="abc123",
             )
+            verification = verify_manifest(
+                evidence_dir=evidence,
+                manifest_path=evidence / "manifest.json",
+            )
 
             paths = [entry["path"] for entry in manifest["files"]]
             self.assertEqual(paths, sorted(paths))
@@ -119,8 +131,47 @@ class InferenceEvidenceTests(unittest.TestCase):
                 paths,
                 ["analysis.json", "raw/capture.jsonl", "raw/request.json"],
             )
-            self.assertTrue((evidence / "manifest.json").is_file())
             self.assertEqual(manifest["result"]["status"], "COMPLETE")
+            self.assertEqual(verification["status"], "VERIFIED")
+            self.assertEqual(verification["files_checked"], 3)
+
+    def test_cli_builds_bundle_and_writes_external_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request, capture = self.write_inputs(root)
+            evidence = root / "bundle"
+            report = root / "cli-report.json"
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "build-inference-evidence",
+                        "--request",
+                        str(request),
+                        "--capture",
+                        str(capture),
+                        "--evidence-dir",
+                        str(evidence),
+                        "--provider",
+                        "cerebras",
+                        "--model",
+                        "test-model",
+                        "--project-sha",
+                        "abc123",
+                        "--report",
+                        str(report),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(json.loads(report.read_text())["result"]["status"], "COMPLETE")
+            self.assertEqual(
+                verify_manifest(
+                    evidence_dir=evidence,
+                    manifest_path=evidence / "manifest.json",
+                )["status"],
+                "VERIFIED",
+            )
 
     def test_rejects_api_key_in_request_json(self):
         with tempfile.TemporaryDirectory() as directory:
