@@ -68,3 +68,15 @@ artifacts/<suite-slug>/<model-slug>/
 ```
 
 Adding another versioned suite requires a corpus file and one catalog entry rather than a copied GitHub Actions job.
+
+## Live verification records
+
+Ordinary feature pull requests do not receive the provider credential and skip live inference. A same-repository branch whose name starts with:
+
+```text
+verify/qa-suite-live-
+```
+
+creates an explicit reviewable live run. A verification record is identified by the workflow run ID, exact head SHA, suite/model artifact names, artifact digests, score summaries, and outer-manifest verification results.
+
+Artifacts are retained for 14 days by the workflow. One run is evidence for that exact corpus, model endpoint, request configuration, and moment in time; it is not evidence of stable quality across repeated runs.
