@@ -7,6 +7,7 @@ on:
       - "pyproject.toml"
       - "docs/releases/**"
       - "docs/evidence/releases/**"
+      - "docs/RELEASE_ATTESTATIONS.md"
       - "scripts/build_release_evidence_asset.py"
       - "scripts/verify_release_asset_copy.py"
       - "scripts/release_asset_sidecars.py"
@@ -102,6 +103,17 @@ jobs:
 
           echo "Validated release candidate $tag"
 
+      - name: Validate GitHub CLI attestation policy flags
+        shell: bash
+        run: |
+          set -euo pipefail
+          help="$(gh attestation verify --help)"
+          grep -Fq -- "--repo" <<< "$help"
+          grep -Fq -- "--signer-workflow" <<< "$help"
+          grep -Fq -- "--deny-self-hosted-runners" <<< "$help"
+          grep -Fq -- "--bundle" <<< "$help"
+          grep -Fq -- "--format" <<< "$help"
+
   publish:
     if: >-
       github.event_name == 'workflow_run' &&
@@ -111,6 +123,11 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
 
     steps:
       - name: Check out the exact green commit
@@ -140,6 +157,7 @@ jobs:
           asset=""
           checksum=""
           provenance=""
+          attestation=""
 
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "Unsupported release version: $version" >&2
@@ -154,6 +172,7 @@ jobs:
             asset="artifacts/${tag}-cerebras-live-evidence.zip"
             checksum="${asset}.sha256"
             provenance="${asset}.provenance.json"
+            attestation="artifacts/${tag}-release-attestation.sigstore.json"
             python scripts/build_release_evidence_asset.py --source "$source" --output "$asset"
             python scripts/release_asset_sidecars.py write \
               --asset "$asset" \
@@ -173,6 +192,7 @@ jobs:
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
           echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
           echo "provenance=$provenance" >> "$GITHUB_OUTPUT"
+          echo "attestation=$attestation" >> "$GITHUB_OUTPUT"
 
       - name: Inspect existing release tag
         id: existing
@@ -199,6 +219,29 @@ jobs:
             echo "same_commit=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Generate keyless build provenance
+        id: attest
+        if: steps.existing.outputs.exists == 'false' && steps.release.outputs.asset != ''
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: |
+            ${{ steps.release.outputs.asset }}
+            ${{ steps.release.outputs.checksum }}
+            ${{ steps.release.outputs.provenance }}
+
+      - name: Preserve Sigstore attestation bundle
+        if: steps.existing.outputs.exists == 'false' && steps.release.outputs.asset != ''
+        env:
+          SOURCE_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          ATTESTATION: ${{ steps.release.outputs.attestation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -s "$SOURCE_BUNDLE" ]]
+          mkdir -p "$(dirname "$ATTESTATION")"
+          cp "$SOURCE_BUNDLE" "$ATTESTATION"
+          [[ -s "$ATTESTATION" ]]
+
       - name: Publish GitHub Release
         if: steps.existing.outputs.exists == 'false'
         env:
@@ -209,6 +252,7 @@ jobs:
           ASSET: ${{ steps.release.outputs.asset }}
           CHECKSUM: ${{ steps.release.outputs.checksum }}
           PROVENANCE: ${{ steps.release.outputs.provenance }}
+          ATTESTATION: ${{ steps.release.outputs.attestation }}
         shell: bash
         run: |
           set -euo pipefail
@@ -225,11 +269,12 @@ jobs:
               "$ASSET#Cerebras live evidence bundle"
               "$CHECKSUM#SHA-256 checksum"
               "$PROVENANCE#Release asset provenance"
+              "$ATTESTATION#Keyless Sigstore attestation bundle"
             )
           fi
           gh release create "${args[@]}"
 
-      - name: Verify release and downloaded assets
+      - name: Verify release, assets, and keyless attestations
         if: >-
           steps.existing.outputs.exists == 'false' ||
           steps.existing.outputs.same_commit == 'true'
@@ -237,9 +282,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
           EXPECTED_SHA: ${{ steps.release.outputs.sha }}
+          EXISTING_RELEASE: ${{ steps.existing.outputs.exists }}
           ASSET: ${{ steps.release.outputs.asset }}
           CHECKSUM: ${{ steps.release.outputs.checksum }}
           PROVENANCE: ${{ steps.release.outputs.provenance }}
+          ATTESTATION: ${{ steps.release.outputs.attestation }}
         shell: bash
         run: |
           set -euo pipefail
@@ -253,23 +300,28 @@ jobs:
             asset_name="$(basename "$ASSET")"
             checksum_name="$(basename "$CHECKSUM")"
             provenance_name="$(basename "$PROVENANCE")"
+            attestation_name="$(basename "$ATTESTATION")"
             release_assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
             grep -Fx "$asset_name" <<< "$release_assets"
             grep -Fx "$checksum_name" <<< "$release_assets"
             grep -Fx "$provenance_name" <<< "$release_assets"
+            grep -Fx "$attestation_name" <<< "$release_assets"
 
             download_dir="$(mktemp -d)"
             downloaded_asset="$download_dir/$asset_name"
             downloaded_checksum="$download_dir/$checksum_name"
             downloaded_provenance="$download_dir/$provenance_name"
+            downloaded_attestation="$download_dir/$attestation_name"
             asset_report="artifacts/${TAG}-release-asset-verification.json"
             checksum_copy_report="artifacts/${TAG}-release-checksum-copy-verification.json"
             provenance_copy_report="artifacts/${TAG}-release-provenance-copy-verification.json"
+            attestation_copy_report="artifacts/${TAG}-release-sigstore-bundle-copy-verification.json"
             metadata_report="artifacts/${TAG}-release-metadata-verification.json"
 
             gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset_name" --dir "$download_dir"
             gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$checksum_name" --dir "$download_dir"
             gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$provenance_name" --dir "$download_dir"
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$attestation_name" --dir "$download_dir"
 
             python scripts/verify_release_asset_copy.py \
               --expected "$ASSET" \
@@ -283,6 +335,12 @@ jobs:
               --expected "$PROVENANCE" \
               --actual "$downloaded_provenance" \
               --report "$provenance_copy_report"
+            if [[ "$EXISTING_RELEASE" == "false" ]]; then
+              python scripts/verify_release_asset_copy.py \
+                --expected "$ATTESTATION" \
+                --actual "$downloaded_attestation" \
+                --report "$attestation_copy_report"
+            fi
             python scripts/release_asset_sidecars.py verify \
               --asset "$downloaded_asset" \
               --subject-name "$asset_name" \
@@ -294,13 +352,43 @@ jobs:
               --workflow ".github/workflows/release.yml" \
               --report "$metadata_report"
 
+            signer_workflow="$GITHUB_REPOSITORY/.github/workflows/release.yml"
+            subjects=("$downloaded_asset" "$downloaded_checksum" "$downloaded_provenance")
+            labels=("asset" "checksum" "provenance")
+            attestation_reports=()
+            for index in "${!subjects[@]}"; do
+              subject="${subjects[$index]}"
+              label="${labels[$index]}"
+              online_report="artifacts/${TAG}-release-${label}-attestation-online.json"
+              bundled_report="artifacts/${TAG}-release-${label}-attestation-bundled.json"
+              gh attestation verify "$subject" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$signer_workflow" \
+                --deny-self-hosted-runners \
+                --format json > "$online_report"
+              gh attestation verify "$subject" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$signer_workflow" \
+                --deny-self-hosted-runners \
+                --bundle "$downloaded_attestation" \
+                --format json > "$bundled_report"
+              attestation_reports+=("$online_report" "$bundled_report")
+            done
+
+            reports=(
+              "$asset_report"
+              "$checksum_copy_report"
+              "$provenance_copy_report"
+              "$metadata_report"
+            )
+            if [[ -f "$attestation_copy_report" ]]; then
+              reports+=("$attestation_copy_report")
+            fi
+            reports+=("${attestation_reports[@]}")
+
             {
-              echo "### Release asset integrity"
-              for report in \
-                "$asset_report" \
-                "$checksum_copy_report" \
-                "$provenance_copy_report" \
-                "$metadata_report"; do
+              echo "### Release asset integrity and keyless attestation"
+              for report in "${reports[@]}"; do
                 echo
                 echo "#### $(basename "$report")"
                 echo '```json'
