@@ -21,13 +21,14 @@ _PROVIDER_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 
 
 def _load_object(path: Path, *, label: str) -> dict[str, Any]:
-    path = path.resolve()
-    if path.is_symlink() or not path.is_file():
-        raise QAMatrixError(f"{label} must be a regular non-symlink file: {path}")
+    original = path
+    if original.is_symlink() or not original.is_file():
+        raise QAMatrixError(f"{label} must be a regular non-symlink file: {original}")
+    resolved = original.resolve(strict=True)
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
-        raise QAMatrixError(f"{path}: invalid {label} JSON: {error.msg}") from error
+        raise QAMatrixError(f"{resolved}: invalid {label} JSON: {error.msg}") from error
     if not isinstance(payload, dict):
         raise QAMatrixError(f"{label} must be a JSON object")
     return payload
@@ -45,19 +46,23 @@ def _resolve_suite_path(*, repository_root: Path, relative_path: Any) -> Path:
     candidate = Path(relative_path)
     if candidate.is_absolute() or ".." in candidate.parts:
         raise QAMatrixError(f"suite path must stay inside the repository: {relative_path!r}")
-    resolved = (repository_root / candidate).resolve()
+    original = repository_root / candidate
+    if original.is_symlink() or not original.is_file():
+        raise QAMatrixError(
+            f"suite path must reference a regular non-symlink file: {relative_path!r}"
+        )
+    resolved = original.resolve(strict=True)
     try:
         resolved.relative_to(repository_root)
     except ValueError as error:
         raise QAMatrixError(f"suite path escapes repository: {relative_path!r}") from error
-    if resolved.is_symlink() or not resolved.is_file():
-        raise QAMatrixError(f"suite path must reference a regular file: {relative_path!r}")
     return resolved
 
 
 def build_workflow_matrix(catalog_path: Path) -> dict[str, list[dict[str, Any]]]:
-    catalog_path = catalog_path.resolve()
-    catalog = _load_object(catalog_path, label="QA suite catalog")
+    original_catalog_path = catalog_path
+    catalog = _load_object(original_catalog_path, label="QA suite catalog")
+    catalog_path = original_catalog_path.resolve(strict=True)
     if catalog.get("schema_version") != 1:
         raise QAMatrixError("QA suite catalog schema_version must equal 1")
 
