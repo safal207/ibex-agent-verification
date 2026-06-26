@@ -1,28 +1,34 @@
-# AI QA Engineer Verification Suite
+# AI QA Engineer Verification Suites
 
-The AI QA Engineer Verification Suite measures whether a hosted language model can complete constrained, reviewable QA tasks under a fixed request and scoring contract.
+The AI QA Engineer verification rail measures whether a hosted language model can complete constrained, reviewable QA tasks under fixed request, scoring, and evidence contracts.
 
-It combines the repository's hosted inference evidence rail with deterministic QA-oriented scoring. A model does not receive points for persuasive prose, verbosity, or matching another model's opinion. It receives points only for exact JSON fields evaluated by ordinary code.
+A model does not receive points for persuasive prose, verbosity, or matching another model's opinion. It receives points only for exact JSON fields evaluated by ordinary deterministic code.
 
-## Core suite v0.1
+## Versioned suites
 
-The first version contains five tasks:
+The catalog currently contains two suites:
 
-| Task | QA capability |
-|---|---|
-| `bug-triage-idempotency` | root-cause analysis, severity, ownership, regression selection |
-| `test-design-boundaries` | boundary-value and invalid-type selection |
-| `api-contract-statuses` | HTTP contract interpretation |
-| `sql-result-paid-orders` | SQL filtering, grouping, aggregation, and ordering |
-| `logs-duplicate-order` | ordered-log analysis and preventive-control selection |
+| Suite | Focus | Tasks |
+|---|---|---:|
+| `qa-engineer-core-v0.1` | bug triage, test design, API contracts, SQL, and logs | 5 |
+| `mobile-qa-engineer-v0.1` | lifecycle, offline sync, permissions, deep links, and migration | 5 |
 
-The versioned source is:
+Sources:
 
 ```text
 benchmarks/qa-engineer-core-v0.1.json
+benchmarks/mobile-qa-engineer-v0.1.json
 ```
 
-Changing a prompt, expected answer, task order, or completion budget requires changing the corpus file and therefore changes its SHA-256.
+Changing a prompt, expected answer, task order, or completion budget changes the corpus file and therefore its SHA-256.
+
+The workflow inventory is defined by:
+
+```text
+benchmarks/qa-suite-catalog.json
+```
+
+The catalog is validated before live inference. Suite paths must remain inside the repository, IDs and task counts must match the actual files, and model/suite slugs must be unique.
 
 ## Scoring contract
 
@@ -32,88 +38,92 @@ Each prompt requires one strict JSON object:
 - no explanatory prose;
 - no extra keys;
 - exact JSON types;
-- exact values or array ordering;
+- exact values and array ordering;
 - no credential-like keys.
 
-The scorer awards one point for exact structure and one point for each expected leaf value. This exposes partial failures. A model can identify the correct root cause while still losing a point for an incorrect severity or owner.
+The scorer awards one point for exact structure and one point for each expected leaf value. Invalid, failed, and output-truncated responses retain the full task denominator, so every model is compared against the same possible score.
+
+`finish_reason=length` is reported explicitly as `OUTPUT_TRUNCATED`, rather than being disguised as an ordinary wrong answer.
 
 The scorer is deterministic. It does not ask a second language model to grade the first model.
 
 ## Live execution
 
-The GitHub Actions workflow runs the suite independently for:
+The GitHub Actions workflow builds a validated cross-product of every configured suite and model. The current models are:
 
 ```text
 gpt-oss-120b
 zai-glm-4.7
 ```
 
-For each model it:
+Jobs run sequentially, with a cooldown before each inference, to reduce provider quota noise. For each suite/model pair the workflow:
 
 1. verifies the model is present in the live Cerebras model catalog;
-2. prepares five model-bound requests from the versioned corpus;
-3. records each raw streaming interaction;
-4. builds and independently verifies an inference evidence manifest;
-5. scores the exact streamed JSON response;
-6. produces a per-model summary;
-7. builds an outer SHA-256 manifest covering the corpus-derived requests, captures, inference manifests, score reports, model catalog, and summary;
-8. scans every output for the repository credential value;
-9. uploads a model-scoped evidence artifact.
+2. validates the selected suite identity and task count;
+3. prepares model-bound requests from the versioned corpus;
+4. records each raw streaming interaction;
+5. builds and independently verifies an inference evidence manifest;
+6. scores the exact streamed JSON response;
+7. produces a suite/model summary;
+8. builds an outer SHA-256 manifest covering requests, captures, inference manifests, score reports, model catalog, and summary;
+9. scans every output for the repository credential value;
+10. uploads a suite-and-model-scoped evidence artifact.
 
-A wrong model answer is a benchmark result, not an infrastructure exception. Missing evidence, malformed manifests, unavailable models, missing credentials, or inconsistent identities fail the workflow.
+A wrong model answer is a benchmark result, not an infrastructure exception. Missing evidence, malformed manifests, unavailable models, missing credentials, inconsistent identities, or an invalid catalog fail the workflow.
 
 ## Evidence shape
 
 ```text
-qa-benchmark/
-├── manifest.json
-├── model-catalog.json
-├── summary.json
-└── tasks/
-    └── <task-id>/
-        ├── request.json
-        ├── run-report.json
-        ├── score.json
-        ├── verification.json
-        └── evidence/
-            ├── analysis.json
-            ├── manifest.json
-            └── raw/
-                ├── capture.jsonl
-                └── request.json
+artifacts/<suite-slug>/<model-slug>/
+├── qa-benchmark-verification.json
+└── qa-benchmark/
+    ├── manifest.json
+    ├── model-catalog.json
+    ├── summary.json
+    └── tasks/
+        └── <task-id>/
+            ├── request.json
+            ├── run-report.json
+            ├── score.json
+            ├── verification.json
+            └── evidence/
+                ├── analysis.json
+                ├── manifest.json
+                └── raw/
+                    ├── capture.jsonl
+                    └── request.json
 ```
 
 The outer verification report is stored next to the bundle so it cannot silently modify the bundle it verifies.
 
-## What the score means
+## What a score means
 
-The score supports a narrow claim:
+A score supports a narrow claim:
 
 > On this exact versioned set of constrained QA tasks, the model produced these exact responses and earned these deterministic field-level points.
 
 It does not prove:
 
 - general model intelligence;
-- full QA Engineer seniority;
+- complete QA Engineer seniority;
 - exploratory testing skill;
 - product judgment under ambiguity;
 - production safety;
 - stable latency or quality across time;
-- superiority over another model on unseen work.
+- superiority on unseen work.
 
 ## Planned progression
 
 Future independently versioned suites can add:
 
-- mobile lifecycle and offline-sync failures;
 - web state and browser compatibility;
-- API schema and integration chains;
+- API schema and multi-service integration chains;
 - SQL mutation and transaction isolation;
 - security and prompt-injection resistance;
-- log correlation and distributed tracing;
+- distributed tracing and log correlation;
 - test automation review;
 - CI/CD failure diagnosis;
 - product-risk prioritization;
 - communication and bug-report quality.
 
-Repeated runs, randomized order, hidden holdout tasks, statistical confidence intervals, and human review are required before treating results as a robust model comparison.
+Repeated runs, randomized order, hidden holdout tasks, statistical confidence intervals, device-lab execution, and human review are required before treating results as a robust model comparison.
