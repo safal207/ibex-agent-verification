@@ -7,7 +7,13 @@ import zipfile
 from pathlib import Path
 
 from ibex_agent_verification.evidence import verify_manifest
-from scripts.resolve_release_evidence_source import resolve_release_evidence_source
+
+try:
+    from scripts.resolve_release_evidence_source import resolve_release_evidence_source
+except ModuleNotFoundError as error:
+    if error.name != "scripts":
+        raise
+    from resolve_release_evidence_source import resolve_release_evidence_source
 
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
