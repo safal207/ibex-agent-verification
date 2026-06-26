@@ -5,6 +5,11 @@ import json
 import sys
 from pathlib import Path
 
+from .cerebras_runner import (
+    CerebrasRunnerBlocked,
+    CerebrasRunnerError,
+    run_cerebras_inference,
+)
 from .comparator import compare_traces
 from .evidence import EvidenceError, verify_manifest
 from .ibex_trace import (
@@ -107,6 +112,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--report", help="optional CLI report outside the evidence directory"
     )
 
+    cerebras_runner = subparsers.add_parser(
+        "run-cerebras-inference",
+        help="run one real Cerebras Cloud stream and build a verified evidence bundle",
+    )
+    cerebras_runner.add_argument(
+        "--request", required=True, help="sanitized streaming chat request JSON"
+    )
+    cerebras_runner.add_argument(
+        "--evidence-dir", required=True, help="empty or absent bundle output directory"
+    )
+    cerebras_runner.add_argument("--model", required=True, help="model identifier")
+    cerebras_runner.add_argument(
+        "--project-sha", required=True, help="repository commit producing the bundle"
+    )
+    cerebras_runner.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=60.0,
+        help="single-request timeout in seconds (default: 60)",
+    )
+    cerebras_runner.add_argument(
+        "--report", help="optional CLI report outside the evidence directory"
+    )
+
     silicon_gate = subparsers.add_parser(
         "gate-silicon-change",
         help="issue ALLOW, BLOCK, or ESCALATE from reproducible silicon evidence",
@@ -196,6 +225,23 @@ def main(argv: list[str] | None = None) -> int:
                 project_sha=args.project_sha,
             )
             exit_code = 0 if payload["result"]["status"] == "COMPLETE" else 1
+        elif args.command == "run-cerebras-inference":
+            evidence_dir = Path(args.evidence_dir)
+            evidence_root = evidence_dir.resolve(strict=False)
+            if args.report:
+                report = Path(args.report).resolve(strict=False)
+                if report.is_relative_to(evidence_root):
+                    raise CerebrasRunnerError(
+                        "CLI report must be outside the Cerebras evidence directory"
+                    )
+            payload = run_cerebras_inference(
+                request_path=Path(args.request),
+                evidence_dir=evidence_dir,
+                model=args.model,
+                project_sha=args.project_sha,
+                timeout_seconds=args.timeout_seconds,
+            )
+            exit_code = 0 if payload["result"]["status"] == "COMPLETE" else 1
         elif args.command == "gate-silicon-change":
             payload = evaluate_gate(args.request)
             exit_code = {"ALLOW": 0, "BLOCK": 1, "ESCALATE": 3}[
@@ -203,11 +249,16 @@ def main(argv: list[str] | None = None) -> int:
             ]
         else:
             return 2
+    except CerebrasRunnerBlocked as exc:
+        payload = {"status": "BLOCKED", "error": str(exc)}
+        print(json.dumps(payload, indent=2), file=sys.stderr)
+        return 4
     except (
         TraceValidationError,
         GateInputError,
         EvidenceError,
         InferenceEvidenceError,
+        CerebrasRunnerError,
         OSError,
     ) as exc:
         payload = {"status": "INVALID_INPUT", "error": str(exc)}

@@ -69,13 +69,17 @@ The repository is still Ibex-first. This adapter tests whether the same evidence
 - ✅ refuse to estimate tokens per second when usage is absent
 - ✅ reject API-key fields from persisted request JSON
 - ✅ emit a manifest compatible with `verify-evidence`
-- ⏳ direct Cerebras Cloud capture runner with pinned client version
-- ⏳ repeated runs, warmups, p50/p95, and error-rate aggregation
+- ✅ direct Cerebras Cloud capture runner with pinned optional SDK
+- ✅ force the official endpoint and disable hidden warming and retries
+- ✅ preserve real HTTP and stream failures as verifiable `REQUEST_FAILED` bundles
+- ✅ return `BLOCKED` without synthetic evidence when credentials or SDK are absent
+- ⏳ first hosted Cerebras Cloud evidence bundle using a real repository secret
+- ⏳ repeated runs, explicit warmups, p50/p95, and error-rate aggregation
 - ⏳ independent tokenizer-based token counting
 - ⏳ provider comparison under one workload contract
 - ⏳ model quality and numerical-drift gates
 
-See [OpenAI-Compatible Inference Evidence](INFERENCE_EVIDENCE.md).
+See [OpenAI-Compatible Inference Evidence](INFERENCE_EVIDENCE.md) and [Direct Cerebras Cloud Evidence Runner](CEREBRAS_CLOUD_RUNNER.md).
 
 ## Phase 2 — reference ISA oracle
 

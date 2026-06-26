@@ -20,6 +20,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+cerebras = ["cerebras_cloud_sdk==1.67.0"]
+
 [project.scripts]
 ibex-av = "ibex_agent_verification.cli:main"
 
