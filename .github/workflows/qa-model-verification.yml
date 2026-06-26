@@ -13,6 +13,16 @@ on:
       - "tests/test_qa_benchmark.py"
       - "tests/test_qa_benchmark_workflow.py"
       - "docs/AI_QA_ENGINEER_SUITE.md"
+  pull_request:
+    paths:
+      - ".github/workflows/qa-model-verification.yml"
+      - "benchmarks/qa-engineer-core-v0.1.json"
+      - "src/ibex_agent_verification/qa_benchmark.py"
+      - "scripts/qa_benchmark.py"
+      - "scripts/build_qa_benchmark_bundle.py"
+      - "tests/test_qa_benchmark.py"
+      - "tests/test_qa_benchmark_workflow.py"
+      - "docs/AI_QA_ENGINEER_SUITE.md"
 
 permissions:
   contents: read
@@ -23,6 +33,12 @@ concurrency:
 
 jobs:
   qa-suite:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        startsWith(github.head_ref, 'verify/qa-suite-live-')
+      )
     name: qa-suite (${{ matrix.model }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
