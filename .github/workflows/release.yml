@@ -9,6 +9,7 @@ on:
       - "docs/evidence/releases/**"
       - "scripts/build_release_evidence_asset.py"
       - "scripts/verify_release_asset_copy.py"
+      - "scripts/release_asset_sidecars.py"
   workflow_run:
     workflows: ["CI"]
     types: [completed]
@@ -40,7 +41,7 @@ jobs:
       - name: Install verification project
         run: python -m pip install -e .
 
-      - name: Validate release metadata and evidence asset
+      - name: Validate release metadata and evidence assets
         shell: bash
         run: |
           set -euo pipefail
@@ -48,8 +49,13 @@ jobs:
           tag="v${version}"
           notes="docs/releases/${tag}.md"
           source="docs/evidence/releases/${tag}/cerebras-live"
+          asset_name="${tag}-cerebras-live-evidence.zip"
           first="artifacts/${tag}-cerebras-live-evidence-first.zip"
           second="artifacts/${tag}-cerebras-live-evidence-second.zip"
+          first_checksum="${first}.sha256"
+          second_checksum="${second}.sha256"
+          first_provenance="${first}.provenance.json"
+          second_provenance="${second}.provenance.json"
 
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ -s "$notes" ]]
@@ -61,6 +67,37 @@ jobs:
             python scripts/verify_release_asset_copy.py \
               --expected "$first" \
               --actual "$second"
+
+            python scripts/release_asset_sidecars.py write \
+              --asset "$first" \
+              --subject-name "$asset_name" \
+              --checksum "$first_checksum" \
+              --provenance "$first_provenance" \
+              --repository "$GITHUB_REPOSITORY" \
+              --commit "${{ github.event.pull_request.head.sha }}" \
+              --tag "$tag" \
+              --workflow ".github/workflows/release.yml"
+            python scripts/release_asset_sidecars.py write \
+              --asset "$second" \
+              --subject-name "$asset_name" \
+              --checksum "$second_checksum" \
+              --provenance "$second_provenance" \
+              --repository "$GITHUB_REPOSITORY" \
+              --commit "${{ github.event.pull_request.head.sha }}" \
+              --tag "$tag" \
+              --workflow ".github/workflows/release.yml"
+
+            cmp "$first_checksum" "$second_checksum"
+            cmp "$first_provenance" "$second_provenance"
+            python scripts/release_asset_sidecars.py verify \
+              --asset "$second" \
+              --subject-name "$asset_name" \
+              --checksum "$second_checksum" \
+              --provenance "$second_provenance" \
+              --repository "$GITHUB_REPOSITORY" \
+              --commit "${{ github.event.pull_request.head.sha }}" \
+              --tag "$tag" \
+              --workflow ".github/workflows/release.yml"
           fi
 
           echo "Validated release candidate $tag"
@@ -101,6 +138,8 @@ jobs:
           notes="docs/releases/${tag}.md"
           source="docs/evidence/releases/${tag}/cerebras-live"
           asset=""
+          checksum=""
+          provenance=""
 
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "Unsupported release version: $version" >&2
@@ -113,7 +152,18 @@ jobs:
 
           if [[ -d "$source" ]]; then
             asset="artifacts/${tag}-cerebras-live-evidence.zip"
+            checksum="${asset}.sha256"
+            provenance="${asset}.provenance.json"
             python scripts/build_release_evidence_asset.py --source "$source" --output "$asset"
+            python scripts/release_asset_sidecars.py write \
+              --asset "$asset" \
+              --subject-name "$(basename "$asset")" \
+              --checksum "$checksum" \
+              --provenance "$provenance" \
+              --repository "$GITHUB_REPOSITORY" \
+              --commit "${{ github.event.workflow_run.head_sha }}" \
+              --tag "$tag" \
+              --workflow ".github/workflows/release.yml"
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -121,6 +171,8 @@ jobs:
           echo "notes=$notes" >> "$GITHUB_OUTPUT"
           echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+          echo "provenance=$provenance" >> "$GITHUB_OUTPUT"
 
       - name: Inspect existing release tag
         id: existing
@@ -155,6 +207,8 @@ jobs:
           RELEASE_SHA: ${{ steps.release.outputs.sha }}
           NOTES: ${{ steps.release.outputs.notes }}
           ASSET: ${{ steps.release.outputs.asset }}
+          CHECKSUM: ${{ steps.release.outputs.checksum }}
+          PROVENANCE: ${{ steps.release.outputs.provenance }}
         shell: bash
         run: |
           set -euo pipefail
@@ -167,11 +221,15 @@ jobs:
             --latest
           )
           if [[ -n "$ASSET" ]]; then
-            args+=("$ASSET#Cerebras live evidence bundle")
+            args+=(
+              "$ASSET#Cerebras live evidence bundle"
+              "$CHECKSUM#SHA-256 checksum"
+              "$PROVENANCE#Release asset provenance"
+            )
           fi
           gh release create "${args[@]}"
 
-      - name: Verify release and downloaded asset
+      - name: Verify release and downloaded assets
         if: >-
           steps.existing.outputs.exists == 'false' ||
           steps.existing.outputs.same_commit == 'true'
@@ -180,6 +238,8 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
           EXPECTED_SHA: ${{ steps.release.outputs.sha }}
           ASSET: ${{ steps.release.outputs.asset }}
+          CHECKSUM: ${{ steps.release.outputs.checksum }}
+          PROVENANCE: ${{ steps.release.outputs.provenance }}
         shell: bash
         run: |
           set -euo pipefail
@@ -191,29 +251,62 @@ jobs:
 
           if [[ -n "$ASSET" ]]; then
             asset_name="$(basename "$ASSET")"
-            gh release view "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --json assets \
-              --jq '.assets[].name' | grep -Fx "$asset_name"
+            checksum_name="$(basename "$CHECKSUM")"
+            provenance_name="$(basename "$PROVENANCE")"
+            release_assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+            grep -Fx "$asset_name" <<< "$release_assets"
+            grep -Fx "$checksum_name" <<< "$release_assets"
+            grep -Fx "$provenance_name" <<< "$release_assets"
 
             download_dir="$(mktemp -d)"
             downloaded_asset="$download_dir/$asset_name"
-            verification_report="artifacts/${TAG}-release-asset-verification.json"
-            gh release download "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --pattern "$asset_name" \
-              --dir "$download_dir"
+            downloaded_checksum="$download_dir/$checksum_name"
+            downloaded_provenance="$download_dir/$provenance_name"
+            asset_report="artifacts/${TAG}-release-asset-verification.json"
+            checksum_copy_report="artifacts/${TAG}-release-checksum-copy-verification.json"
+            provenance_copy_report="artifacts/${TAG}-release-provenance-copy-verification.json"
+            metadata_report="artifacts/${TAG}-release-metadata-verification.json"
+
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset_name" --dir "$download_dir"
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$checksum_name" --dir "$download_dir"
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$provenance_name" --dir "$download_dir"
+
             python scripts/verify_release_asset_copy.py \
               --expected "$ASSET" \
               --actual "$downloaded_asset" \
-              --report "$verification_report"
+              --report "$asset_report"
+            python scripts/verify_release_asset_copy.py \
+              --expected "$CHECKSUM" \
+              --actual "$downloaded_checksum" \
+              --report "$checksum_copy_report"
+            python scripts/verify_release_asset_copy.py \
+              --expected "$PROVENANCE" \
+              --actual "$downloaded_provenance" \
+              --report "$provenance_copy_report"
+            python scripts/release_asset_sidecars.py verify \
+              --asset "$downloaded_asset" \
+              --subject-name "$asset_name" \
+              --checksum "$downloaded_checksum" \
+              --provenance "$downloaded_provenance" \
+              --repository "$GITHUB_REPOSITORY" \
+              --commit "$EXPECTED_SHA" \
+              --tag "$TAG" \
+              --workflow ".github/workflows/release.yml" \
+              --report "$metadata_report"
 
             {
               echo "### Release asset integrity"
-              echo
-              echo '```json'
-              cat "$verification_report"
-              echo '```'
+              for report in \
+                "$asset_report" \
+                "$checksum_copy_report" \
+                "$provenance_copy_report" \
+                "$metadata_report"; do
+                echo
+                echo "#### $(basename "$report")"
+                echo '```json'
+                cat "$report"
+                echo '```'
+              done
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
