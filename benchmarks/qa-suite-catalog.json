@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "models": [
+    {
+      "provider": "cerebras",
+      "model": "gpt-oss-120b",
+      "slug": "gpt-oss-120b"
+    },
+    {
+      "provider": "cerebras",
+      "model": "zai-glm-4.7",
+      "slug": "zai-glm-4-7"
+    }
+  ],
+  "suites": [
+    {
+      "suite_id": "qa-engineer-core-v0.1",
+      "slug": "core-v0-1",
+      "path": "benchmarks/qa-engineer-core-v0.1.json",
+      "expected_task_count": 5
+    },
+    {
+      "suite_id": "mobile-qa-engineer-v0.1",
+      "slug": "mobile-v0-1",
+      "path": "benchmarks/mobile-qa-engineer-v0.1.json",
+      "expected_task_count": 5
+    }
+  ]
+}
