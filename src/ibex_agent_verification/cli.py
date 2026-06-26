@@ -13,6 +13,7 @@ from .ibex_trace import (
     write_metadata_jsonl,
     write_timing_jsonl,
 )
+from .inference_evidence import InferenceEvidenceError, build_inference_bundle
 from .models import TraceValidationError
 from .silicon_gate import GateInputError, evaluate_gate
 from .timing import analyze_timing, load_timing_jsonl
@@ -23,8 +24,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ibex-av",
         description=(
-            "Parse official Ibex traces, compare architectural events, "
-            "analyze timing anomalies, verify evidence bundles, and gate silicon changes."
+            "Parse official Ibex traces, compare architectural events, analyze timing "
+            "anomalies, verify evidence bundles, capture inference evidence, and gate "
+            "silicon changes."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -79,6 +81,30 @@ def build_parser() -> argparse.ArgumentParser:
     verify_evidence.add_argument(
         "--report",
         help="optional verification report outside the evidence directory",
+    )
+
+    inference_evidence = subparsers.add_parser(
+        "build-inference-evidence",
+        help="build a verified bundle from a recorded OpenAI-compatible stream",
+    )
+    inference_evidence.add_argument(
+        "--request", required=True, help="sanitized OpenAI-compatible request JSON"
+    )
+    inference_evidence.add_argument(
+        "--capture", required=True, help="timestamped inference capture JSONL"
+    )
+    inference_evidence.add_argument(
+        "--evidence-dir", required=True, help="empty or absent bundle output directory"
+    )
+    inference_evidence.add_argument(
+        "--provider", required=True, help="provider label, for example cerebras"
+    )
+    inference_evidence.add_argument("--model", required=True, help="model identifier")
+    inference_evidence.add_argument(
+        "--project-sha", required=True, help="repository commit producing the bundle"
+    )
+    inference_evidence.add_argument(
+        "--report", help="optional CLI report outside the evidence directory"
     )
 
     silicon_gate = subparsers.add_parser(
@@ -152,6 +178,24 @@ def main(argv: list[str] | None = None) -> int:
                 manifest_path=manifest,
             )
             exit_code = 0 if payload["status"] == "VERIFIED" else 1
+        elif args.command == "build-inference-evidence":
+            evidence_dir = Path(args.evidence_dir)
+            evidence_root = evidence_dir.resolve(strict=False)
+            if args.report:
+                report = Path(args.report).resolve(strict=False)
+                if report.is_relative_to(evidence_root):
+                    raise InferenceEvidenceError(
+                        "CLI report must be outside the inference evidence directory"
+                    )
+            payload = build_inference_bundle(
+                capture_path=Path(args.capture),
+                request_path=Path(args.request),
+                evidence_dir=evidence_dir,
+                provider=args.provider,
+                model=args.model,
+                project_sha=args.project_sha,
+            )
+            exit_code = 0 if payload["result"]["status"] == "COMPLETE" else 1
         elif args.command == "gate-silicon-change":
             payload = evaluate_gate(args.request)
             exit_code = {"ALLOW": 0, "BLOCK": 1, "ESCALATE": 3}[
@@ -159,7 +203,13 @@ def main(argv: list[str] | None = None) -> int:
             ]
         else:
             return 2
-    except (TraceValidationError, GateInputError, EvidenceError, OSError) as exc:
+    except (
+        TraceValidationError,
+        GateInputError,
+        EvidenceError,
+        InferenceEvidenceError,
+        OSError,
+    ) as exc:
         payload = {"status": "INVALID_INPUT", "error": str(exc)}
         print(json.dumps(payload, indent=2), file=sys.stderr)
         return 2
