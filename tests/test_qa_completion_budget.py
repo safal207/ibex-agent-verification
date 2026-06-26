@@ -15,6 +15,18 @@ MODEL = "test-model"
 PROVIDER = "cerebras"
 
 
+def leaf_count(value) -> int:
+    if isinstance(value, dict):
+        return sum(leaf_count(item) for item in value.values())
+    if isinstance(value, list):
+        return sum(leaf_count(item) for item in value)
+    return 1
+
+
+def possible_points(task: dict) -> int:
+    return 1 + leaf_count(task["expected"])
+
+
 def write_length_limited_capture(path: Path) -> None:
     events = [
         {"event": "request_start", "monotonic_ns": 1},
@@ -64,6 +76,12 @@ class QACompletionBudgetTests(unittest.TestCase):
             {1024},
         )
 
+    def test_non_integer_oracle_is_explicit_not_ambiguous(self):
+        suite = load_qa_suite(SUITE_PATH)
+        task = next(task for task in suite["tasks"] if task["id"] == "test-design-boundaries")
+        self.assertIn("use 18.5 as the explicit invalid non-integer probe", task["prompt"])
+        self.assertEqual(task["expected"]["non_integer"], 18.5)
+
     def test_length_finish_reason_is_not_misreported_as_model_answer_failure(self):
         suite = load_qa_suite(SUITE_PATH)
         task = suite["tasks"][0]
@@ -99,9 +117,11 @@ class QACompletionBudgetTests(unittest.TestCase):
         self.assertEqual(payload["diagnostic"]["code"], "OUTPUT_TRUNCATED")
         self.assertEqual(payload["diagnostic"]["max_completion_tokens"], 1024)
         self.assertEqual(payload["score"]["percent"], 0.0)
+        self.assertEqual(payload["score"]["possible"], possible_points(task))
+        self.assertEqual(payload["score"]["possible"], 5)
         self.assertNotIn("observed", payload)
 
-    def test_summary_counts_truncation_separately_and_as_invalid(self):
+    def test_summary_counts_truncation_with_full_suite_denominator(self):
         suite = load_qa_suite(SUITE_PATH)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -116,7 +136,11 @@ class QACompletionBudgetTests(unittest.TestCase):
                     "provider": PROVIDER,
                     "model": MODEL,
                     "status": "OUTPUT_TRUNCATED",
-                    "score": {"earned": 0, "possible": 1, "percent": 0.0},
+                    "score": {
+                        "earned": 0,
+                        "possible": possible_points(task),
+                        "percent": 0.0,
+                    },
                     "output": {"text_sha256": "0" * 64},
                 }
                 (reports / f"{task['id']}.json").write_text(
@@ -147,6 +171,9 @@ class QACompletionBudgetTests(unittest.TestCase):
         self.assertEqual(summary["tasks_invalid"], 5)
         self.assertEqual(summary["tasks_passed"], 0)
         self.assertEqual(summary["tasks_failed"], 0)
+        self.assertEqual(summary["score"]["earned"], 0)
+        self.assertEqual(summary["score"]["possible"], 29)
+        self.assertEqual(summary["score"]["percent"], 0.0)
 
 
 if __name__ == "__main__":
