@@ -76,7 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--evidence-dir",
         help="bundle root; defaults to the manifest parent directory",
     )
-    verify_evidence.add_argument("--report", help="optional verification report JSON path")
+    verify_evidence.add_argument(
+        "--report",
+        help="optional verification report outside the evidence directory",
+    )
 
     silicon_gate = subparsers.add_parser(
         "gate-silicon-change",
@@ -137,6 +140,13 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "verify-evidence":
             manifest = Path(args.manifest)
             evidence_dir = Path(args.evidence_dir) if args.evidence_dir else manifest.parent
+            evidence_root = evidence_dir.resolve(strict=True)
+            if args.report:
+                report = Path(args.report).resolve(strict=False)
+                if report.is_relative_to(evidence_root):
+                    raise EvidenceError(
+                        "verification report must be outside the evidence directory"
+                    )
             payload = verify_manifest(
                 evidence_dir=evidence_dir,
                 manifest_path=manifest,
