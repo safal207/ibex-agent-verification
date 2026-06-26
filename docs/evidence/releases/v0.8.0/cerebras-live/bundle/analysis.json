@@ -1,0 +1,37 @@
+{
+  "claim_boundary": "This report verifies a recorded OpenAI-compatible API interaction and its client-observed and provider-reported timing metrics. It does not verify provider hardware, internal RTL, model quality, energy efficiency, or a vendor-wide tokens-per-second claim.",
+  "error": null,
+  "event_count": 17,
+  "http_status": 200,
+  "model": "gpt-oss-120b",
+  "output": {
+    "text_characters": 11,
+    "text_sha256": "4e47826698bb4630fb4451010062fadbf85d61427cbdfaed7ad0f23f239bed89"
+  },
+  "provider": "cerebras",
+  "schema_version": 1,
+  "status": "COMPLETE",
+  "throughput": {
+    "estimated": false,
+    "output_tokens_per_second": 1912.297310144391,
+    "source": "provider_usage_and_time_info",
+    "unavailable_reason": null
+  },
+  "timing": {
+    "duration_ms": 204.233532,
+    "generation_ms": 0.879126,
+    "provider_reported_seconds": {
+      "completion_time": 0.032944668,
+      "prompt_time": 0.001930294,
+      "queue_time": 0.004015505,
+      "total_time": 0.06395673751831055
+    },
+    "time_to_first_output_ms": 203.354406
+  },
+  "usage": {
+    "completion_tokens": 63,
+    "prompt_tokens": 73,
+    "reasoning_tokens": 51,
+    "total_tokens": 136
+  }
+}
