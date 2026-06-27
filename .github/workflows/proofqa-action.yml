@@ -6,8 +6,10 @@ on:
       - ".github/workflows/proofqa-action.yml"
       - "proofqa/action.yml"
       - "scripts/proofqa_gate.py"
-      - "tests/test_proofqa_gate.py"
-      - "tests/test_proofqa_action_metadata.py"
+      - "scripts/proofqa_gate_v3.py"
+      - "src/ibex_agent_verification/qa_scorecard.py"
+      - "scripts/qa_benchmark.py"
+      - "tests/test_proofqa*.py"
       - "tests/fixtures/proofqa/**"
       - "docs/PROOFQA_GITHUB_ACTION.md"
   push:
@@ -16,8 +18,10 @@ on:
       - ".github/workflows/proofqa-action.yml"
       - "proofqa/action.yml"
       - "scripts/proofqa_gate.py"
-      - "tests/test_proofqa_gate.py"
-      - "tests/test_proofqa_action_metadata.py"
+      - "scripts/proofqa_gate_v3.py"
+      - "src/ibex_agent_verification/qa_scorecard.py"
+      - "scripts/qa_benchmark.py"
+      - "tests/test_proofqa*.py"
       - "tests/fixtures/proofqa/**"
       - "docs/PROOFQA_GITHUB_ACTION.md"
 
@@ -34,13 +38,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: PASS decision
+      - name: PASS time decision
         id: pass
         uses: ./proofqa
         with:
-          summary-path: tests/fixtures/proofqa/summary-pass.json
+          summary-path: tests/fixtures/proofqa/summary-time-pass.json
           policy-name: mobile-production
-          report-path: artifacts/proofqa-pass.json
+          max-p95-duration-ms: "1000"
+          time-warn-margin-ms: "250"
+          report-path: artifacts/proofqa-time-pass.json
 
       - name: Verify PASS outputs
         env:
@@ -48,6 +54,7 @@ jobs:
           SHOULD_FAIL: ${{ steps.pass.outputs.should-fail }}
           END_TO_END: ${{ steps.pass.outputs.end-to-end-percent }}
           COMPLETION: ${{ steps.pass.outputs.completion-reliability-percent }}
+          P95_MS: ${{ steps.pass.outputs.p95-duration-ms }}
         shell: bash
         run: |
           set -euo pipefail
@@ -55,38 +62,43 @@ jobs:
           [[ "$SHOULD_FAIL" == "false" ]]
           [[ "$END_TO_END" == "100.000000" ]]
           [[ "$COMPLETION" == "100.000000" ]]
-          [[ -s artifacts/proofqa-pass.json ]]
+          [[ "$P95_MS" == "700.000000" ]]
+          [[ -s artifacts/proofqa-time-pass.json ]]
 
-      - name: WARN decision without failing block-only enforcement
+      - name: WARN time decision without failing block-only enforcement
         id: warn
         uses: ./proofqa
         with:
-          summary-path: tests/fixtures/proofqa/summary-warn.json
-          policy-name: core-canary
-          min-end-to-end: "95"
-          warn-margin: "3"
+          summary-path: tests/fixtures/proofqa/summary-time-warn.json
+          policy-name: mobile-canary
+          max-p95-duration-ms: "1000"
+          time-warn-margin-ms: "250"
           fail-on: block
-          report-path: artifacts/proofqa-warn.json
+          report-path: artifacts/proofqa-time-warn.json
 
       - name: Verify WARN outputs
         env:
           DECISION: ${{ steps.warn.outputs.decision }}
           SHOULD_FAIL: ${{ steps.warn.outputs.should-fail }}
+          P95_MS: ${{ steps.warn.outputs.p95-duration-ms }}
         shell: bash
         run: |
           set -euo pipefail
           [[ "$DECISION" == "WARN" ]]
           [[ "$SHOULD_FAIL" == "false" ]]
-          [[ -s artifacts/proofqa-warn.json ]]
+          [[ "$P95_MS" == "900.000000" ]]
+          [[ -s artifacts/proofqa-time-warn.json ]]
 
-      - name: BLOCK decision fails the action
+      - name: BLOCK time decision fails the action
         id: block
         continue-on-error: true
         uses: ./proofqa
         with:
-          summary-path: tests/fixtures/proofqa/summary-block.json
-          policy-name: strict-production
-          report-path: artifacts/proofqa-block.json
+          summary-path: tests/fixtures/proofqa/summary-time-block.json
+          policy-name: strict-mobile-production
+          max-p95-duration-ms: "1000"
+          time-warn-margin-ms: "250"
+          report-path: artifacts/proofqa-time-block.json
 
       - name: Verify BLOCK enforcement
         env:
@@ -95,29 +107,46 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$STEP_OUTCOME" == "failure" ]]
-          [[ -s artifacts/proofqa-block.json ]]
+          [[ -s artifacts/proofqa-time-block.json ]]
           python - <<'PY'
           import json
           from pathlib import Path
 
-          report = json.loads(Path("artifacts/proofqa-block.json").read_text())
+          report = json.loads(Path("artifacts/proofqa-time-block.json").read_text())
           assert report["decision"] == "BLOCK"
           assert report["should_fail"] is True
-          assert {
-              finding["axis"]
+          blocked = [
+              finding
               for finding in report["findings"]
               if finding["status"] == "BLOCK"
-          } == {
-              "end_to_end",
-              "completion_reliability",
-              "provider_reliability",
-          }
+          ]
+          assert [finding["axis"] for finding in blocked] == ["time_performance"]
+          assert blocked[0]["actual"] == 1200.0
+          assert blocked[0]["threshold"] == 1000.0
           PY
+
+      - name: Preserve v2 compatibility with time gate disabled
+        id: legacy
+        uses: ./proofqa
+        with:
+          summary-path: tests/fixtures/proofqa/summary-pass.json
+          max-p95-duration-ms: "0"
+          report-path: artifacts/proofqa-v2-compatible.json
+
+      - name: Verify v2 compatibility
+        env:
+          DECISION: ${{ steps.legacy.outputs.decision }}
+          P95_MS: ${{ steps.legacy.outputs.p95-duration-ms }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DECISION" == "PASS" ]]
+          [[ "$P95_MS" == "n/a" ]]
 
       - name: Upload gate reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: proofqa-release-gate-reports-${{ github.sha }}
+          name: proofqa-time-axis-reports-${{ github.sha }}
           path: artifacts/proofqa-*.json
           if-no-files-found: error
           retention-days: 14
