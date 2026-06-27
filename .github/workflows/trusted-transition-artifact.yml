@@ -8,10 +8,12 @@ on:
       - "scripts/trusted_transition_artifact.py"
       - "scripts/trusted_transition_reference_source.py"
       - "scripts/trusted_transition_artifact_audit.py"
+      - "scripts/publish_trusted_artifact_ingestion_receipt.py"
       - "scripts/production_transition_source.py"
       - "scripts/proofqa_transition_manifest*.py"
       - "proofqa/action.yml"
       - "tests/test_trusted_transition_artifact*.py"
+      - "tests/test_publish_trusted_artifact_ingestion_receipt.py"
       - "docs/TRUSTED_TRANSITION_ARTIFACT_INGESTION.md"
   workflow_run:
     workflows: ["ProofQA Transition Source Artifact"]
@@ -44,7 +46,8 @@ jobs:
             tests.test_production_transition_source \
             tests.test_proofqa_transition_manifest_builder \
             tests.test_trusted_transition_artifact \
-            tests.test_trusted_transition_artifact_workflow
+            tests.test_trusted_transition_artifact_workflow \
+            tests.test_publish_trusted_artifact_ingestion_receipt
 
   produce:
     if: >-
@@ -58,6 +61,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      issues: write
       id-token: write
       attestations: write
       artifact-metadata: write
@@ -200,9 +204,34 @@ jobs:
             --expected-signer-workflow "$GITHUB_REPOSITORY/.github/workflows/trusted-transition-artifact.yml" \
             --report artifacts/trusted-transition-ingested/final-audit.json
       - name: Upload signed ingested trust chain
+        id: upload-trust-chain
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: trusted-transition-ingested-${{ github.event.workflow_run.head_sha }}
           path: artifacts/trusted-transition-ingested
           if-no-files-found: error
           retention-days: 30
+      - name: Publish artifact-ingestion receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          PRODUCER_RUN_ID: ${{ github.run_id }}
+          FINAL_ARTIFACT_ID: ${{ steps.upload-trust-chain.outputs.artifact-id }}
+          FINAL_ARTIFACT_URL: ${{ steps.upload-trust-chain.outputs.artifact-url }}
+          FINAL_ARTIFACT_DIGEST: ${{ steps.upload-trust-chain.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          python scripts/publish_trusted_artifact_ingestion_receipt.py \
+            --audit artifacts/trusted-transition-ingested/final-audit.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-commit "$SOURCE_SHA" \
+            --producer-run-id "$PRODUCER_RUN_ID" \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --final-artifact-id "$FINAL_ARTIFACT_ID" \
+            --final-artifact-url "$FINAL_ARTIFACT_URL" \
+            --final-artifact-digest "$FINAL_ARTIFACT_DIGEST" \
+            --output /tmp/trusted-artifact-ingestion-receipt.md
+          gh issue comment 42 \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file /tmp/trusted-artifact-ingestion-receipt.md
