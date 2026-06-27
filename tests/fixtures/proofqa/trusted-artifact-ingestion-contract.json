@@ -1,0 +1,16 @@
+{
+  "artifact_name_template": "proofqa-transition-source-{source_commit}",
+  "claim_boundary": "Reference cross-workflow ingestion only; not a production deployment claim.",
+  "destination_identity": "proofqa:trusted-artifact-ingestion",
+  "expected_source_files": [
+    "evidence/action.json",
+    "evidence/intent.json",
+    "evidence/result.json",
+    "evidence/verification.json",
+    "source-provenance.json",
+    "transition-report.json"
+  ],
+  "manifest_signer_workflow": ".github/workflows/trusted-transition-artifact.yml",
+  "schema_version": 1,
+  "source_workflow": ".github/workflows/proofqa-transition-source.yml"
+}
