@@ -105,6 +105,19 @@ class ProofQAActionMetadataTests(unittest.TestCase):
             ACTION,
         )
 
+    def test_derived_outputs_cannot_mutate_verified_bundle(self):
+        self.assertIn('evidence_root="$(realpath "$EVIDENCE_DIR")"', ACTION)
+        self.assertIn('receipt_resolved="$(realpath -m "$RECEIPT_PATH")"', ACTION)
+        self.assertIn('report_resolved="$(realpath -m "$REPORT_PATH")"', ACTION)
+        self.assertIn(
+            "Derived ProofQA outputs must be outside transition-evidence-dir",
+            ACTION,
+        )
+        self.assertLess(
+            ACTION.index("Derived ProofQA outputs must be outside"),
+            ACTION.index("proofqa_transition_manifest.py\" verify"),
+        )
+
     def test_attestation_verification_is_exact_and_fail_closed(self):
         self.assertEqual(ACTION.count("gh attestation verify"), 2)
         self.assertIn('--signer-workflow "$EXPECTED_SIGNER_WORKFLOW"', ACTION)
