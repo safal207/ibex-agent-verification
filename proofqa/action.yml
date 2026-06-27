@@ -1,10 +1,10 @@
 name: "ProofQA Release Gate"
 author: "Aleksei Safonov"
-description: "Evidence-first PASS, WARN, or BLOCK release gate for ProofQA scorecard v2 summaries."
+description: "Evidence-first PASS, WARN, or BLOCK release gate for ProofQA scorecard v2/v3 summaries."
 
 inputs:
   summary-path:
-    description: "Path to a ProofQA summary.json containing scorecard_version 2."
+    description: "Path to a ProofQA summary.json containing scorecard_version 2 or 3."
     required: true
   policy-name:
     description: "Human-readable policy name included in the gate report."
@@ -30,6 +30,14 @@ inputs:
     description: "Percentage-point margin above each minimum that produces WARN instead of PASS."
     required: false
     default: "3"
+  max-p95-duration-ms:
+    description: "Maximum client-observed p95 duration for successful requests in milliseconds; zero disables the time gate."
+    required: false
+    default: "0"
+  time-warn-margin-ms:
+    description: "Warning band below the maximum p95 duration in milliseconds."
+    required: false
+    default: "250"
   unknown-metric-policy:
     description: "Decision for null metrics. One of block, warn, or ignore."
     required: false
@@ -68,6 +76,9 @@ outputs:
   provider-reliability-percent:
     description: "Evaluated provider reliability percentage or n/a."
     value: ${{ steps.gate.outputs.provider-reliability-percent }}
+  p95-duration-ms:
+    description: "Client-observed successful-request p95 duration in milliseconds or n/a."
+    value: ${{ steps.gate.outputs.p95-duration-ms }}
 
 runs:
   using: "composite"
@@ -88,11 +99,13 @@ runs:
         PROOFQA_MIN_COMPLETION_RELIABILITY: ${{ inputs.min-completion-reliability }}
         PROOFQA_MIN_PROVIDER_RELIABILITY: ${{ inputs.min-provider-reliability }}
         PROOFQA_WARN_MARGIN: ${{ inputs.warn-margin }}
+        PROOFQA_MAX_P95_DURATION_MS: ${{ inputs.max-p95-duration-ms }}
+        PROOFQA_TIME_WARN_MARGIN_MS: ${{ inputs.time-warn-margin-ms }}
         PROOFQA_UNKNOWN_METRIC_POLICY: ${{ inputs.unknown-metric-policy }}
         PROOFQA_FAIL_ON: ${{ inputs.fail-on }}
         PROOFQA_REPORT_PATH: ${{ inputs.report-path }}
-      run: python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate.py"
+      run: python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate_v3.py"
 
 branding:
-  icon: "shield"
+  icon: "clock"
   color: "blue"
