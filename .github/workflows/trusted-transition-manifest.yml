@@ -1,0 +1,172 @@
+name: Trusted Transition Manifest Producer
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/trusted-transition-manifest.yml"
+      - "scripts/proofqa_transition_manifest*.py"
+      - "scripts/trusted_transition_reference.py"
+      - "proofqa/action.yml"
+      - "tests/test_proofqa_transition_manifest*.py"
+      - "tests/test_trusted_transition_manifest_workflow.py"
+      - "tests/test_trusted_transition_reference.py"
+      - "tests/fixtures/proofqa/transition-manifest-bundle/**"
+      - "docs/PROOFQA_GITHUB_ACTION.md"
+      - "docs/TRUSTED_TRANSITION_MANIFEST_PRODUCER.md"
+      - "README.md"
+  workflow_run:
+    workflows: ["ProofQA Release Gate Action"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trusted-transition-manifest-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: Test trusted producer contracts
+        run: |
+          python -m unittest -v \
+            tests.test_proofqa_transition_manifest_builder \
+            tests.test_trusted_transition_manifest_workflow \
+            tests.test_trusted_transition_reference
+      - name: Rebuild and verify reference manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -a tests/fixtures/proofqa/transition-manifest-bundle artifacts-reference
+          rm artifacts-reference/manifest.json
+          python scripts/proofqa_transition_manifest_builder.py \
+            --evidence-dir artifacts-reference \
+            --output artifacts-reference/manifest.json \
+            --report validation-build.json
+          cmp artifacts-reference/manifest.json \
+            tests/fixtures/proofqa/transition-manifest-bundle/manifest.json
+          python scripts/proofqa_transition_manifest.py verify \
+            --evidence-dir artifacts-reference \
+            --manifest artifacts-reference/manifest.json \
+            --transition-report artifacts-reference/transition-report.json \
+            --policy require-attested \
+            --receipt validation-pending-receipt.json
+
+  produce:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out exact green main commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: Require immutable trusted source identity
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]]
+          git diff --exit-code
+      - name: Assemble final reference source
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          TRIGGER_WORKFLOW: ${{ github.event.workflow_run.name }}
+        run: |
+          python scripts/trusted_transition_reference.py assemble \
+            --source-dir tests/fixtures/proofqa/transition-manifest-bundle \
+            --output-dir artifacts/trusted-transition-reference/bundle \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-commit "$SOURCE_SHA" \
+            --trigger-run-id "$TRIGGER_RUN_ID" \
+            --trigger-workflow "$TRIGGER_WORKFLOW" \
+            --report artifacts/trusted-transition-reference/assembly.json
+      - name: Build exact final manifest
+        run: |
+          python scripts/proofqa_transition_manifest_builder.py \
+            --evidence-dir artifacts/trusted-transition-reference/bundle \
+            --output artifacts/trusted-transition-reference/bundle/manifest.json \
+            --report artifacts/trusted-transition-reference/manifest-build.json
+          python scripts/proofqa_transition_manifest.py verify \
+            --evidence-dir artifacts/trusted-transition-reference/bundle \
+            --manifest artifacts/trusted-transition-reference/bundle/manifest.json \
+            --transition-report artifacts/trusted-transition-reference/bundle/transition-report.json \
+            --policy require-attested \
+            --receipt artifacts/trusted-transition-reference/pre-attestation-receipt.json
+      - name: Generate keyless manifest attestation
+        id: attest
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: artifacts/trusted-transition-reference/bundle/manifest.json
+      - name: Preserve exact Sigstore bundle
+        env:
+          SOURCE_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          test -s "$SOURCE_BUNDLE"
+          cp "$SOURCE_BUNDLE" artifacts/trusted-transition-reference/manifest.sigstore.json
+      - name: Require attested transition through ProofQA
+        id: proofqa
+        uses: ./proofqa
+        with:
+          summary-path: tests/fixtures/proofqa/summary-time-pass.json
+          transition-report-path: artifacts/trusted-transition-reference/bundle/transition-report.json
+          transition-policy: require-verified
+          transition-manifest-policy: require-attested
+          transition-evidence-dir: artifacts/trusted-transition-reference/bundle
+          transition-manifest-path: artifacts/trusted-transition-reference/bundle/manifest.json
+          transition-manifest-receipt-path: artifacts/trusted-transition-reference/manifest-receipt.json
+          transition-attestation-bundle-path: artifacts/trusted-transition-reference/manifest.sigstore.json
+          transition-attestation-repository: ${{ github.repository }}
+          transition-attestation-signer-workflow: ${{ github.repository }}/.github/workflows/trusted-transition-manifest.yml
+          policy-name: trusted-reference-post-ci
+          max-p95-duration-ms: "1000"
+          fail-on: block
+          report-path: artifacts/trusted-transition-reference/proofqa-gate-report.json
+      - name: Audit final signed trust chain
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          python scripts/trusted_transition_reference.py audit \
+            --root-dir artifacts/trusted-transition-reference \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-commit "$SOURCE_SHA" \
+            --report artifacts/trusted-transition-reference/final-audit.json
+      - name: Upload signed reference trust chain
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trusted-transition-reference-${{ github.event.workflow_run.head_sha }}
+          path: artifacts/trusted-transition-reference
+          if-no-files-found: error
+          retention-days: 30
