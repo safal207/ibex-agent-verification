@@ -15,8 +15,7 @@
     "statement": "Move the release plan into execution.",
     "action": null,
     "expected_result": "A release decision is supported by verified evidence.",
-    "stopping_condition": "The release decision is recorded.",
-    "unused": null
+    "stopping_condition": "The release decision is recorded."
   },
   "space": {
     "origin": "agent.plan.draft",
