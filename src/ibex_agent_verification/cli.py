@@ -23,6 +23,10 @@ from .models import TraceValidationError
 from .silicon_gate import GateInputError, evaluate_gate
 from .timing import analyze_timing, load_timing_jsonl
 from .trace_io import load_jsonl
+from .transition_phase import (
+    TransitionPhaseError,
+    evaluate_transition_file,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,8 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ibex-av",
         description=(
             "Parse official Ibex traces, compare architectural events, analyze timing "
-            "anomalies, verify evidence bundles, capture inference evidence, and gate "
-            "silicon changes."
+            "anomalies, verify evidence bundles and transition phases, capture inference "
+            "evidence, and gate silicon changes."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -86,6 +90,20 @@ def build_parser() -> argparse.ArgumentParser:
     verify_evidence.add_argument(
         "--report",
         help="optional verification report outside the evidence directory",
+    )
+
+    transition_phase = subparsers.add_parser(
+        "verify-transition-phase",
+        help="verify one explicit transition across time, intention, and space",
+    )
+    transition_phase.add_argument(
+        "--record",
+        required=True,
+        help="transition phase JSON record",
+    )
+    transition_phase.add_argument(
+        "--report",
+        help="optional transition verification report path",
     )
 
     inference_evidence = subparsers.add_parser(
@@ -207,6 +225,22 @@ def main(argv: list[str] | None = None) -> int:
                 manifest_path=manifest,
             )
             exit_code = 0 if payload["status"] == "VERIFIED" else 1
+        elif args.command == "verify-transition-phase":
+            record_path = Path(args.record).resolve(strict=True)
+            if args.report:
+                report_path = Path(args.report).resolve(strict=False)
+                if report_path == record_path or (
+                    report_path.exists() and report_path.samefile(record_path)
+                ):
+                    raise TransitionPhaseError(
+                        "transition verification report must differ from the source record"
+                    )
+            payload = evaluate_transition_file(record_path)
+            exit_code = {
+                "VERIFIED": 0,
+                "IN_PROGRESS": 1,
+                "RECALIBRATE": 3,
+            }[payload["status"]]
         elif args.command == "build-inference-evidence":
             evidence_dir = Path(args.evidence_dir)
             evidence_root = evidence_dir.resolve(strict=False)
@@ -258,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         GateInputError,
         EvidenceError,
         InferenceEvidenceError,
+        TransitionPhaseError,
         CerebrasRunnerError,
         OSError,
     ) as exc:
