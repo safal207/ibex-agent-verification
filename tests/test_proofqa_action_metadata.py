@@ -65,15 +65,23 @@ class ProofQAActionMetadataTests(unittest.TestCase):
             with self.subTest(output_name=output_name):
                 self.assertIn(f"  {output_name}", ACTION)
 
-    def test_composite_runtime_is_pinned_and_calls_v4_gate(self):
+    def test_composite_runtime_is_pinned_and_preflights_transition(self):
         self.assertIn(
             "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
             ACTION,
         )
         self.assertNotIn("actions/setup-python@v", ACTION)
         self.assertIn(
+            'python "$GITHUB_ACTION_PATH/../scripts/proofqa_transition_preflight.py"',
+            ACTION,
+        )
+        self.assertIn(
             'python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate_v4.py"',
             ACTION,
+        )
+        self.assertLess(
+            ACTION.index("proofqa_transition_preflight.py"),
+            ACTION.index("proofqa_gate_v4.py"),
         )
         self.assertIn("PROOFQA_SUMMARY_PATH: ${{ inputs.summary-path }}", ACTION)
         self.assertIn(
