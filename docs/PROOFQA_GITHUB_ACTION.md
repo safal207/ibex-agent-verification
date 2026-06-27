@@ -1,6 +1,6 @@
 # ProofQA Release Gate GitHub Action
 
-ProofQA converts a deterministic QA scorecard v2 summary into a CI decision:
+ProofQA converts a deterministic QA scorecard v2 or v3 summary into a CI decision:
 
 ```text
 PASS
@@ -8,16 +8,19 @@ WARN
 BLOCK
 ```
 
-The gate evaluates four separate axes instead of treating one blended percentage as model quality:
+The gate keeps five concerns separate instead of treating one blended number as model quality:
 
 - end-to-end score;
 - answer correctness on completed strict-JSON tasks;
 - completion reliability;
-- provider reliability.
+- provider reliability;
+- client-observed time performance.
 
-## MVP usage
+Scorecard v3 measures time. The release policy decides whether the measured p95 satisfies a product SLO.
 
-The repository already has a separate root silicon action, so the ProofQA MVP is exposed from the `proofqa` subdirectory:
+## Usage
+
+The repository has a separate root silicon action, so ProofQA is exposed from the `proofqa` subdirectory:
 
 ```yaml
 - name: Evaluate AI QA release evidence
@@ -31,28 +34,81 @@ The repository already has a separate root silicon action, so the ProofQA MVP is
     min-completion-reliability: "95"
     min-provider-reliability: "99"
     warn-margin: "3"
+    max-p95-duration-ms: "2000"
+    time-warn-margin-ms: "250"
     unknown-metric-policy: block
     fail-on: block
     report-path: artifacts/proofqa-gate-report.json
 ```
 
-Pin the action to a full commit SHA. A future dedicated `proofqa-action` repository can publish immutable `v1` releases and a GitHub Marketplace listing without replacing the existing root silicon action.
+Pin the action to a full commit SHA. A future dedicated `proofqa-action` repository can publish immutable releases without replacing the existing root silicon action.
+
+## Time-axis semantics
+
+Scorecard v3 derives time from the monotonic timestamps inside each preserved inference capture. It does not use total GitHub job duration, SDK installation time, configured cooldown, or unrelated workflow queue time.
+
+It records deterministic distributions for:
+
+- total client-observed request duration;
+- time to first output;
+- generation time after first output.
+
+Each distribution contains:
+
+```text
+count
+minimum
+p50
+p95
+maximum
+```
+
+Percentiles use linear interpolation over the ordered observed values.
+
+The release gate applies `max-p95-duration-ms` to the total duration of successful HTTP-2xx requests. Provider failures are excluded from the latency distribution and remain visible on the provider-reliability axis. A fast HTTP 429 therefore does not improve the time result. A truncated HTTP-2xx request may satisfy the time SLO while still failing completion reliability.
+
+This separation lets a report say all of the following without contradiction:
+
+```text
+Answer correctness:      100% PASS
+Completion reliability:   40% BLOCK
+Provider reliability:    100% PASS
+Successful p95 duration:  900 ms PASS
+```
+
+The model returned correct answers when it completed, the provider served every request, and the observed requests were fast enough—but most tasks still failed to produce usable final JSON.
+
+## Time decisions
+
+For an enabled time policy:
+
+1. p95 above `max-p95-duration-ms` produces `BLOCK`;
+2. p95 at or below the maximum but above `maximum - time-warn-margin-ms` produces `WARN`;
+3. p95 below the warning band produces `PASS`;
+4. missing p95 follows `unknown-metric-policy`.
+
+Set:
+
+```yaml
+max-p95-duration-ms: "0"
+```
+
+to disable the time gate. This preserves compatibility with scorecard v2 summaries, which do not contain timing distributions.
 
 ## Adoption modes
 
 ### Observe without blocking
-
-Use this during the first integrations while thresholds are being calibrated:
 
 ```yaml
 - uses: safal207/ibex-agent-verification/proofqa@<full-commit-sha>
   id: proofqa
   with:
     summary-path: artifacts/qa-benchmark/summary.json
+    max-p95-duration-ms: "2000"
     fail-on: never
 ```
 
-The action still emits `PASS`, `WARN`, or `BLOCK`, writes the report, adds the Actions summary, and exposes outputs. It does not fail the workflow.
+The action still emits a decision, writes the report, adds the Actions summary, and exposes outputs. It does not fail the workflow.
 
 ### Block failed policy only
 
@@ -61,7 +117,7 @@ with:
   fail-on: block
 ```
 
-`WARN` remains visible but does not fail the step. `BLOCK` exits non-zero.
+`WARN` remains visible. `BLOCK` exits non-zero.
 
 ### Treat warning as failure
 
@@ -70,51 +126,26 @@ with:
   fail-on: warn
 ```
 
-Both `WARN` and `BLOCK` fail the step. This is suitable for strict release branches after the policy has been calibrated.
-
-## Decision rules
-
-For every axis:
-
-1. a value below its minimum produces `BLOCK`;
-2. a value at or above the minimum but below `minimum + warn-margin` produces `WARN`;
-3. a value above the warning band produces `PASS`;
-4. a `null` value follows `unknown-metric-policy`:
-   - `block`;
-   - `warn`;
-   - `ignore`.
-
-The final decision is the most severe axis decision. The `fail-on` input controls workflow enforcement but does not change the recorded decision.
-
-Example:
-
-```text
-End-to-end:             65.5%  → BLOCK
-Answer correctness:   100.0%  → PASS
-Completion reliability: 60.0% → BLOCK
-Provider reliability:   80.0% → BLOCK
-
-Final decision: BLOCK
-```
-
-This keeps model knowledge, answer completion, and provider operation visible as separate causes.
+Both `WARN` and `BLOCK` fail the action.
 
 ## Inputs
 
 | Input | Default | Meaning |
 |---|---:|---|
-| `summary-path` | required | ProofQA `summary.json` with `scorecard_version: 2` |
-| `policy-name` | `default` | name stored in the report and Actions summary |
+| `summary-path` | required | ProofQA `summary.json` with scorecard v2 or v3 |
+| `policy-name` | `default` | name stored in report and Actions summary |
 | `min-end-to-end` | `90` | minimum strict full-denominator score |
 | `min-answer-correctness` | `90` | minimum correctness on completed answers |
-| `min-completion-reliability` | `95` | minimum percentage of tasks producing valid JSON |
+| `min-completion-reliability` | `95` | minimum percentage producing valid JSON |
 | `min-provider-reliability` | `95` | minimum successful known provider outcomes |
-| `warn-margin` | `3` | warning band in percentage points above each minimum |
-| `unknown-metric-policy` | `block` | `block`, `warn`, or `ignore` for `null` metrics |
+| `warn-margin` | `3` | warning band above percentage minimums |
+| `max-p95-duration-ms` | `0` | maximum successful-request p95; zero disables time gate |
+| `time-warn-margin-ms` | `250` | warning band below the p95 maximum |
+| `unknown-metric-policy` | `block` | `block`, `warn`, or `ignore` for null metrics |
 | `fail-on` | `block` | `block`, `warn`, or `never` |
-| `report-path` | `proofqa-gate-report.json` | destination for the machine-readable report |
+| `report-path` | `proofqa-gate-report.json` | machine-readable report destination |
 
-All percentage inputs must be finite values from `0` through `100`.
+Percentage inputs must be finite values from `0` through `100`. Time inputs must be finite non-negative millisecond values up to one hour.
 
 ## Outputs
 
@@ -128,28 +159,21 @@ All percentage inputs must be finite values from `0` through `100`.
 | `answer-correctness-percent` | `100.000000` or `n/a` |
 | `completion-reliability-percent` | `60.000000` or `n/a` |
 | `provider-reliability-percent` | `80.000000` or `n/a` |
-
-A later workflow step can use the outputs:
-
-```yaml
-- name: Require an exact PASS before deployment
-  if: steps.proofqa.outputs.decision != 'PASS'
-  run: exit 1
-```
+| `p95-duration-ms` | `900.000000` or `n/a` |
 
 ## Gate report
 
 The generated JSON binds:
 
-- the policy thresholds;
-- the final decision and enforcement result;
-- all four observed metrics;
+- percentage and time thresholds;
+- final decision and enforcement result;
+- all observed metrics;
 - one finding per axis;
-- suite, provider, and model identity;
-- the source summary path and SHA-256;
+- suite, provider, model, and scorecard identity;
+- source summary path and SHA-256;
 - the claim boundary.
 
-The report is suitable for upload as a workflow artifact or inclusion in a larger release evidence manifest.
+The report can be uploaded as a workflow artifact or included in a larger release evidence manifest.
 
 ## Fail-closed behavior
 
@@ -157,31 +181,31 @@ The action returns configuration error exit code `2` when:
 
 - `summary-path` is missing;
 - the summary is not a regular non-symlink file;
-- the JSON is malformed;
-- `scorecard_version` is not exactly `2`;
-- a metric has an invalid type or falls outside `0..100`;
+- JSON is malformed;
+- scorecard version/schema pairing is invalid;
+- a metric is not finite or falls outside its permitted range;
 - a policy value is invalid;
-- the output report would overwrite the source summary.
+- the report would overwrite the source summary.
 
-A malformed evidence contract cannot be converted into a permissive `PASS`.
+A malformed evidence contract cannot become a permissive `PASS`.
 
-## Security boundary
+## Security and claim boundary
 
 The action:
 
 - requests no repository write permissions;
-- does not require `GITHUB_TOKEN` or provider credentials;
-- uses a pinned `actions/setup-python` commit;
+- requires no `GITHUB_TOKEN` or provider credential;
+- uses a pinned Python setup action;
 - reads one already-produced scorecard;
-- writes one machine-readable gate report;
-- publishes only scorecard metadata and thresholds to the Actions summary.
+- writes one machine-readable report;
+- publishes scorecard metadata and thresholds to the Actions summary.
 
-It does not independently rerun the underlying model, verify an outer evidence manifest, or prove stable model quality across time. Those checks belong earlier in the evidence pipeline.
+It does not rerun the model, verify the outer evidence manifest, or prove stable latency from one five-task sample. Stable latency claims require repeated runs, controlled environments, sample-size disclosure, and trend analysis.
 
-## Next product increments
+## Next increments
 
-1. compare a candidate scorecard against a signed baseline;
-2. aggregate multiple suites and models into one release decision;
-3. emit GitHub Checks annotations on the exact regressed tasks;
-4. support policy files committed to the consumer repository;
+1. compare candidate time distributions against a signed baseline;
+2. aggregate repeated runs and confidence intervals;
+3. separate provider queue time from model execution when trustworthy provider timing exists;
+4. aggregate multiple suites and models into one release decision;
 5. publish a dedicated immutable action repository and Marketplace release.
