@@ -120,6 +120,8 @@ class QACompletionBudgetTests(unittest.TestCase):
         self.assertEqual(payload["score"]["possible"], possible_points(task))
         self.assertEqual(payload["score"]["possible"], 5)
         self.assertNotIn("observed", payload)
+        self.assertEqual(payload["timing"]["duration_ms"], 0.000004)
+        self.assertIsNone(payload["timing"]["time_to_first_output_ms"])
 
     def test_summary_counts_truncation_with_full_suite_denominator(self):
         suite = load_qa_suite(SUITE_PATH)
@@ -176,8 +178,9 @@ class QACompletionBudgetTests(unittest.TestCase):
         self.assertEqual(summary["score"]["possible"], 29)
         self.assertEqual(summary["score"]["percent"], 0.0)
 
-        self.assertEqual(summary["scorecard_version"], 2)
+        self.assertEqual(summary["scorecard_version"], 3)
         scorecard = summary["scorecard"]
+        self.assertEqual(scorecard["schema_version"], 2)
         self.assertEqual(scorecard["end_to_end_score"]["earned"], 0)
         self.assertEqual(scorecard["end_to_end_score"]["possible"], 29)
         self.assertEqual(scorecard["completion_reliability"]["completed"], 0)
@@ -186,6 +189,10 @@ class QACompletionBudgetTests(unittest.TestCase):
         self.assertEqual(scorecard["provider_reliability"]["unknown"], 5)
         self.assertIsNone(scorecard["provider_reliability"]["percent"])
         self.assertEqual(scorecard["outcomes"]["output_truncated"], 5)
+        self.assertEqual(
+            scorecard["time_performance"]["successful_requests"]["duration_ms"]["count"],
+            0,
+        )
 
 
 if __name__ == "__main__":
