@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "transition_id": "release/mobile-production",
+  "status": "VERIFIED",
+  "phase": "REFLECT",
+  "next_phase": "CONTINUE",
+  "issues": [],
+  "axes": {
+    "time": {
+      "status": "PASS"
+    },
+    "intention": {
+      "status": "PASS"
+    },
+    "space": {
+      "status": "PASS"
+    }
+  },
+  "evidence": {
+    "verification_ref": "artifact:release-transition-proof"
+  },
+  "claim_boundary": "Fixture verifies a structurally converged release transition only."
+}
