@@ -9,6 +9,7 @@ from typing import Any
 
 from ibex_agent_verification.inference_evidence import (
     InferenceEvidenceError,
+    analyze_capture,
     load_capture,
 )
 from ibex_agent_verification.qa_benchmark import (
@@ -119,6 +120,29 @@ def _annotate_completion_budget(
     return payload
 
 
+def _annotate_capture_timing(
+    payload: dict,
+    *,
+    capture_path: Path,
+    provider: str,
+    model: str,
+) -> dict:
+    analysis = analyze_capture(
+        load_capture(capture_path),
+        provider=provider,
+        model=model,
+    )
+    timing = analysis.get("timing")
+    if not isinstance(timing, dict):
+        raise QABenchmarkError("inference analysis lacks timing object")
+    payload["timing"] = {
+        "duration_ms": timing.get("duration_ms"),
+        "time_to_first_output_ms": timing.get("time_to_first_output_ms"),
+        "generation_ms": timing.get("generation_ms"),
+    }
+    return payload
+
+
 def _attach_reliability_scorecard(payload: dict, reports: list[dict]) -> dict:
     scorecard = build_reliability_scorecard(reports)
     end_to_end = scorecard["end_to_end_score"]
@@ -130,7 +154,7 @@ def _attach_reliability_scorecard(payload: dict, reports: list[dict]) -> dict:
             )
 
     outcomes = scorecard["outcomes"]
-    payload["scorecard_version"] = 2
+    payload["scorecard_version"] = 3
     payload["scorecard"] = scorecard
     payload["tasks_completed"] = scorecard["completion_reliability"]["completed"]
     payload["tasks_truncated"] = outcomes["output_truncated"]
@@ -203,6 +227,12 @@ def main(argv: list[str] | None = None) -> int:
                 capture_path=args.capture,
                 max_completion_tokens=task["max_completion_tokens"],
                 possible_points=possible_points,
+            )
+            payload = _annotate_capture_timing(
+                payload,
+                capture_path=args.capture,
+                provider=args.provider,
+                model=args.model,
             )
             _write_json(args.report, payload)
         elif args.command == "summarize":
