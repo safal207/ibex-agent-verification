@@ -8,7 +8,7 @@
 [![ProofQA Release Gate](https://github.com/safal207/ibex-agent-verification/actions/workflows/proofqa-action.yml/badge.svg)](https://github.com/safal207/ibex-agent-verification/actions/workflows/proofqa-action.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-## Two evidence rails, one verification core
+## Evidence-first verification
 
 ```text
 Ibex RTL + firmware                     hosted inference request
@@ -24,13 +24,14 @@ normalized reports + causal analysis     deterministic timing + QA scoring
                          ↓
        checksum + provenance + keyless attestation
                          ↓
-              ProofQA PASS / WARN / BLOCK
+      ProofQA quality / reliability / time policy
                          ↓
-       transition verification across time,
-              intention, and space
+  transition policy across time, intention, and space
+                         ↓
+             PASS / WARN / BLOCK
 ```
 
-The project preserves exact inputs, observed outputs, versions, timing evidence, hashes, transition evidence, and release-policy decisions. It does not ask a simulator, agent, provider, benchmark, release asset, or release publisher to be trusted without reviewable evidence.
+The project preserves exact inputs, observed outputs, versions, timing evidence, hashes, transition evidence, and release-policy decisions. A simulator, agent, provider, benchmark, release asset, or release publisher is not trusted without reviewable evidence.
 
 ## Confirmed hosted evidence
 
@@ -39,7 +40,7 @@ The project preserves exact inputs, observed outputs, versions, timing evidence,
 | Ibex causal waveform | `1204/1204` retirements aligned; `385 MEMORY_WAIT`, `248 INSTRUCTION_FETCH_WAIT`, `6 INTERRUPT_SERVICE`, `241 UNKNOWN` | [Ibex hosted evidence](docs/HOSTED_CAUSAL_E2E_EVIDENCE_2026-06-24.md) |
 | Cerebras hosted inference | `HTTP 200`, `COMPLETE`, TTFT `203.354406 ms`, provider-timed throughput `1912.297310144391 tokens/s`, SDK `1.67.0` | [Cerebras hosted evidence](docs/HOSTED_CEREBRAS_EVIDENCE_2026-06-26.md) |
 
-The Cerebras value records one client-observed API stream. It is not a vendor-wide benchmark and does not claim anything about internal WSE or RTL correctness.
+The Cerebras value records one client-observed API stream. It is not a vendor-wide benchmark and makes no claim about internal WSE or RTL correctness.
 
 ## Capabilities
 
@@ -50,9 +51,9 @@ The Cerebras value records one client-observed API stream. It is not a vendor-wi
 - fail-closed rejection of malformed paths, symlinks, missing files, modified files, and unlisted additions;
 - independent verification with `ibex-av verify-evidence`;
 - commit-bound GitHub Actions artifacts and release evidence;
-- deterministic release ZIPs with published checksum and provenance sidecars;
+- deterministic release ZIPs with checksum and provenance sidecars;
 - byte-for-byte verification after GitHub Release download;
-- OIDC-backed keyless Sigstore attestations bound to the repository workflow identity.
+- OIDC-backed keyless Sigstore attestations bound to repository workflow identity.
 
 ### Silicon rail
 
@@ -70,11 +71,11 @@ The Cerebras value records one client-observed API stream. It is not a vendor-wi
 - recursive secret-field rejection;
 - real Cerebras streaming runner with fixed endpoint, disabled retries, disabled TCP warming, and safe response-header allowlisting;
 - TTFT and total client-observed duration;
-- throughput from provider usage plus provider completion timing when reasoning tokens are present;
-- verified `REQUEST_FAILED` evidence for real API, network, and stream failures;
+- provider-timed throughput when trustworthy completion timing exists;
+- verified `REQUEST_FAILED` evidence for API, network, and stream failures;
 - versioned core and mobile QA suites with deterministic field-level scoring;
-- scorecard v3 separating end-to-end result, answer correctness, completion reliability, provider reliability, and client-observed time;
-- ProofQA composite GitHub Action producing `PASS`, `WARN`, or `BLOCK` from configurable thresholds.
+- scorecard v3 separating end-to-end result, correctness, completion, provider reliability, and time;
+- ProofQA composite action producing `PASS`, `WARN`, or `BLOCK` from configurable policies.
 
 ### Transition phase rail
 
@@ -83,7 +84,9 @@ The Cerebras value records one client-observed API stream. It is not a vendor-wi
 - concrete action, expected result, and stopping condition at commit;
 - origin, crossed boundary, destination, and destination observation;
 - fail-closed rejection of backward chronology and execution before commitment;
-- `IN_PROGRESS`, `VERIFIED`, or `RECALIBRATE` outcomes without inferring hidden intent or fabricated presence.
+- `IN_PROGRESS`, `VERIFIED`, or `RECALIBRATE` outcomes;
+- ProofQA policies `ignore`, `warn`, and `require-verified` for gradual or strict continuation control;
+- structural rejection of forged `VERIFIED` reports whose phase, issues, or axes do not converge.
 
 ## Status
 
@@ -91,11 +94,12 @@ This is an early, honest prototype.
 
 - The first hosted Ibex E2E and causal-waveform runs completed on 2026-06-24.
 - The first fully green Cerebras live-evidence run completed on 2026-06-26 in [Actions run 28255376630](https://github.com/safal207/ibex-agent-verification/actions/runs/28255376630).
-- Release `v0.8.0` preserves that inference evidence as a deterministic release asset instead of relying only on the original 14-day Actions artifact.
-- Release `v0.8.1` intentionally reuses those immutable evidence bytes to exercise checksum, provenance, post-download byte verification, and keyless Sigstore attestation end to end.
+- Release `v0.8.0` preserves that inference evidence as a deterministic release asset.
+- Release `v0.8.1` reuses those immutable bytes to exercise checksum, provenance, post-download verification, and keyless attestation end to end.
 - AI QA scorecard v3 includes independent correctness, completion, provider, and time diagnostics.
-- ProofQA Release Gate is an MVP subpath action; a dedicated repository and immutable Marketplace release remain future work.
-- Transition Phase Contract v1 verifies one declared movement across time, intention, and space; integration into the release action remains a later increment.
+- Transition Phase Contract v1 verifies movement across time, intention, and space.
+- ProofQA Release Gate v4 can require a structurally consistent `VERIFIED` transition before deployment or autonomous continuation.
+- A dedicated immutable Marketplace action remains future work.
 - No coverage-closure, silicon-signoff, provider-hardware, energy-efficiency, general model-quality, stable-latency, or vendor-wide performance claim is made.
 
 ## Quick start
@@ -126,23 +130,25 @@ ibex-av verify-transition-phase \
   --report /tmp/payment-recovery-transition-report.json
 ```
 
-Run the pinned Ibex experiment after installing its external prerequisites:
-
-```bash
-bash ./scripts/run_ibex_e2e.sh
-```
-
-Apply a ProofQA release policy to an existing scorecard v2 or v3 summary:
+Require both model evidence and a verified transition:
 
 ```yaml
 - uses: safal207/ibex-agent-verification/proofqa@<full-commit-sha>
   with:
     summary-path: artifacts/qa-benchmark/summary.json
+    transition-report-path: artifacts/release-transition-report.json
+    transition-policy: require-verified
     min-answer-correctness: "95"
     min-completion-reliability: "95"
     min-provider-reliability: "99"
     max-p95-duration-ms: "2000"
     fail-on: block
+```
+
+Run the pinned Ibex experiment after installing its external prerequisites:
+
+```bash
+bash ./scripts/run_ibex_e2e.sh
 ```
 
 For a live hosted inference run, install the optional SDK and follow [the Cerebras runner guide](docs/CEREBRAS_CLOUD_RUNNER.md). Credentials belong in an environment variable or repository secret, never in request JSON, command arguments, logs, or evidence.
@@ -164,7 +170,7 @@ For reasoning-model streams, the analyzer prefers provider-reported `completion_
 
 The pinned silicon workflow preserves raw traces, FST waveforms, normalized architectural and causal reports, tool versions, commands, manifests, and verification reports.
 
-A transition record preserves explicit chronology, intention, spatial boundary, destination, verification booleans, and opaque evidence references. The validator checks internal consistency but does not replace outer evidence verification.
+A transition record preserves explicit chronology, intention, spatial boundary, destination, verification booleans, and opaque evidence references. ProofQA validates the transition report's internal contract and binds its bytes by SHA-256; verification of the referenced external evidence remains a separate manifest responsibility.
 
 ## Documentation
 
@@ -199,7 +205,7 @@ manifest + hashes + independent verification
         ↓
 release checksum + provenance + keyless signature
         ↓
-policy threshold evaluation
+quality, reliability, and time policy
         ↓
 transition verification across t− / t0 / t+
         ↓

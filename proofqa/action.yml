@@ -1,11 +1,19 @@
 name: "ProofQA Release Gate"
 author: "Aleksei Safonov"
-description: "Evidence-first PASS, WARN, or BLOCK release gate for ProofQA scorecard v2/v3 summaries."
+description: "Evidence-first PASS, WARN, or BLOCK gate for ProofQA scorecards and optional transition reports."
 
 inputs:
   summary-path:
     description: "Path to a ProofQA summary.json containing scorecard_version 2 or 3."
     required: true
+  transition-report-path:
+    description: "Optional Transition Phase Contract verification report consumed when transition-policy is not ignore."
+    required: false
+    default: ""
+  transition-policy:
+    description: "Transition enforcement mode. One of ignore, warn, or require-verified."
+    required: false
+    default: "ignore"
   policy-name:
     description: "Human-readable policy name included in the gate report."
     required: false
@@ -79,6 +87,15 @@ outputs:
   p95-duration-ms:
     description: "Client-observed successful-request p95 duration in milliseconds or n/a."
     value: ${{ steps.gate.outputs.p95-duration-ms }}
+  transition-status:
+    description: "Evaluated transition status or n/a."
+    value: ${{ steps.gate.outputs.transition-status }}
+  transition-phase:
+    description: "Evaluated transition phase or n/a."
+    value: ${{ steps.gate.outputs.transition-phase }}
+  transition-sha256:
+    description: "SHA-256 digest of the evaluated transition report or n/a."
+    value: ${{ steps.gate.outputs.transition-sha256 }}
 
 runs:
   using: "composite"
@@ -88,11 +105,20 @@ runs:
       with:
         python-version: "3.12"
 
+    - name: "Preflight transition evidence"
+      shell: bash
+      env:
+        PROOFQA_TRANSITION_REPORT_PATH: ${{ inputs.transition-report-path }}
+        PROOFQA_TRANSITION_POLICY: ${{ inputs.transition-policy }}
+      run: python "$GITHUB_ACTION_PATH/../scripts/proofqa_transition_preflight.py"
+
     - name: "Evaluate ProofQA release policy"
       id: gate
       shell: bash
       env:
         PROOFQA_SUMMARY_PATH: ${{ inputs.summary-path }}
+        PROOFQA_TRANSITION_REPORT_PATH: ${{ inputs.transition-report-path }}
+        PROOFQA_TRANSITION_POLICY: ${{ inputs.transition-policy }}
         PROOFQA_POLICY_NAME: ${{ inputs.policy-name }}
         PROOFQA_MIN_END_TO_END: ${{ inputs.min-end-to-end }}
         PROOFQA_MIN_ANSWER_CORRECTNESS: ${{ inputs.min-answer-correctness }}
@@ -104,8 +130,8 @@ runs:
         PROOFQA_UNKNOWN_METRIC_POLICY: ${{ inputs.unknown-metric-policy }}
         PROOFQA_FAIL_ON: ${{ inputs.fail-on }}
         PROOFQA_REPORT_PATH: ${{ inputs.report-path }}
-      run: python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate_v3.py"
+      run: python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate_v4.py"
 
 branding:
-  icon: "clock"
+  icon: "git-merge"
   color: "blue"

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "transition_id": "release/mobile-canary",
+  "status": "IN_PROGRESS",
+  "phase": "EXPAND",
+  "next_phase": "COMMIT",
+  "issues": [],
+  "axes": {
+    "time": {
+      "status": "WAIT"
+    },
+    "intention": {
+      "status": "WAIT"
+    },
+    "space": {
+      "status": "WAIT"
+    }
+  },
+  "evidence": {
+    "intent_ref": "note:mobile-canary-release",
+    "action_ref": null,
+    "result_ref": null,
+    "verification_ref": null
+  },
+  "claim_boundary": "Fixture represents a valid but unfinished release transition."
+}
