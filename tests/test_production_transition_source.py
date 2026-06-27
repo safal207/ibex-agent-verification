@@ -88,6 +88,31 @@ class ProductionTransitionSourceTests(unittest.TestCase):
             ):
                 validate(source)
 
+    def test_symlinked_evidence_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.copy_source(directory)
+            intent = source / "evidence/intent.json"
+            intent.unlink()
+            intent.symlink_to("result.json")
+            with self.assertRaisesRegex(
+                ProductionTransitionSourceError,
+                "contains a symlink",
+            ):
+                validate(source)
+
+    def test_duplicate_json_key_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.copy_source(directory)
+            (source / "source-provenance.json").write_text(
+                '{"schema_version":1,"schema_version":1}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ProductionTransitionSourceError,
+                "duplicate key: schema_version",
+            ):
+                validate(source)
+
     def test_transition_role_alias_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             source = self.copy_source(directory)
@@ -143,6 +168,21 @@ class ProductionTransitionSourceTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 ProductionTransitionSourceError,
                 "observed_destination mismatch",
+            ):
+                validate(source)
+
+    def test_claim_boundary_mismatch_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.copy_source(directory)
+            rewrite(
+                source / "transition-report.json",
+                lambda payload: payload.__setitem__(
+                    "claim_boundary", "A different and unbound claim."
+                ),
+            )
+            with self.assertRaisesRegex(
+                ProductionTransitionSourceError,
+                "transition claim_boundary mismatch",
             ):
                 validate(source)
 
