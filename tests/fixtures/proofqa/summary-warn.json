@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "status": "COMPLETE",
+  "suite_id": "qa-engineer-core-v0.1",
+  "title": "AI QA Engineer Core Verification Suite v0.1",
+  "provider": "cerebras",
+  "model": "gpt-oss-120b",
+  "scorecard_version": 2,
+  "score": {
+    "earned": 28,
+    "possible": 29,
+    "percent": 96.551724
+  },
+  "scorecard": {
+    "schema_version": 1,
+    "end_to_end_score": {
+      "earned": 28,
+      "possible": 29,
+      "percent": 96.551724
+    },
+    "answer_correctness": {
+      "earned": 28,
+      "possible": 29,
+      "percent": 96.551724,
+      "tasks_evaluated": 5
+    },
+    "completion_reliability": {
+      "completed": 5,
+      "total": 5,
+      "percent": 100.0
+    },
+    "provider_reliability": {
+      "successful": 5,
+      "failed": 0,
+      "unknown": 0,
+      "observed": 5,
+      "total": 5,
+      "percent": 100.0,
+      "failure_classes": {}
+    },
+    "outcomes": {
+      "pass": 4,
+      "fail": 1,
+      "invalid_response": 0,
+      "output_truncated": 0,
+      "inference_failed": 0
+    }
+  }
+}
