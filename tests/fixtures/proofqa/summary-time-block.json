@@ -1,0 +1,18 @@
+{
+  "suite_id": "mobile-qa-engineer-v0.1",
+  "provider": "cerebras",
+  "model": "gpt-oss-120b",
+  "scorecard_version": 3,
+  "scorecard": {
+    "schema_version": 2,
+    "end_to_end_score": {"percent": 100.0},
+    "answer_correctness": {"percent": 100.0},
+    "completion_reliability": {"percent": 100.0},
+    "provider_reliability": {"percent": 100.0},
+    "time_performance": {
+      "successful_requests": {
+        "duration_ms": {"count": 5, "minimum": 350.0, "p50": 750.0, "p95": 1200.0, "maximum": 1300.0}
+      }
+    }
+  }
+}

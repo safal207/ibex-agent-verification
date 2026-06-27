@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections import Counter
 from typing import Any, Iterable
 
@@ -14,12 +15,52 @@ _ALLOWED_STATUSES = {
     "OUTPUT_TRUNCATED",
     "INFERENCE_FAILED",
 }
+_TIMING_FIELDS = (
+    "duration_ms",
+    "time_to_first_output_ms",
+    "generation_ms",
+)
 
 
 def _percent(numerator: int, denominator: int) -> float | None:
     if denominator == 0:
         return None
     return round(numerator * 100.0 / denominator, 6)
+
+
+def _percentile(values: list[float], quantile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return round(ordered[0], 6)
+    position = (len(ordered) - 1) * quantile
+    lower_index = math.floor(position)
+    upper_index = math.ceil(position)
+    if lower_index == upper_index:
+        return round(ordered[lower_index], 6)
+    lower = ordered[lower_index]
+    upper = ordered[upper_index]
+    interpolated = lower + (upper - lower) * (position - lower_index)
+    return round(interpolated, 6)
+
+
+def _distribution(values: list[float]) -> dict[str, int | float | None]:
+    if not values:
+        return {
+            "count": 0,
+            "minimum": None,
+            "p50": None,
+            "p95": None,
+            "maximum": None,
+        }
+    return {
+        "count": len(values),
+        "minimum": round(min(values), 6),
+        "p50": _percentile(values, 0.50),
+        "p95": _percentile(values, 0.95),
+        "maximum": round(max(values), 6),
+    }
 
 
 def _validated_score(report: dict[str, Any], *, task_id: str) -> tuple[int, int]:
@@ -68,6 +109,32 @@ def _provider_failure_class(report: dict[str, Any]) -> str:
     return "transport_timeout_or_unknown"
 
 
+def _validated_timing(report: dict[str, Any], *, task_id: str) -> dict[str, float | None]:
+    timing = report.get("timing")
+    if timing is None:
+        return {field: None for field in _TIMING_FIELDS}
+    if not isinstance(timing, dict):
+        raise QABenchmarkError(f"QA task report {task_id} timing must be an object")
+
+    normalized: dict[str, float | None] = {}
+    for field in _TIMING_FIELDS:
+        value = timing.get(field)
+        if value is None:
+            normalized[field] = None
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise QABenchmarkError(
+                f"QA task report {task_id} timing.{field} must be a finite non-negative number or null"
+            )
+        number = float(value)
+        if not math.isfinite(number) or number < 0:
+            raise QABenchmarkError(
+                f"QA task report {task_id} timing.{field} must be a finite non-negative number or null"
+            )
+        normalized[field] = number
+    return normalized
+
+
 def build_reliability_scorecard(
     reports: Iterable[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -88,6 +155,11 @@ def build_reliability_scorecard(
     provider_failed = 0
     provider_unknown = 0
 
+    all_duration_ms: list[float] = []
+    successful_duration_ms: list[float] = []
+    successful_ttft_ms: list[float] = []
+    successful_generation_ms: list[float] = []
+
     task_results: list[dict[str, Any]] = []
     seen_task_ids: set[str] = set()
     for index, report in enumerate(items):
@@ -106,6 +178,7 @@ def build_reliability_scorecard(
                 f"QA task report {task_id} has unsupported status: {status!r}"
             )
         earned, possible = _validated_score(report, task_id=task_id)
+        timing = _validated_timing(report, task_id=task_id)
         end_to_end_earned += earned
         end_to_end_possible += possible
         outcomes[status] += 1
@@ -125,6 +198,17 @@ def build_reliability_scorecard(
         else:
             provider_unknown += 1
 
+        duration_ms = timing["duration_ms"]
+        if duration_ms is not None:
+            all_duration_ms.append(duration_ms)
+        if provider_outcome == "success":
+            if duration_ms is not None:
+                successful_duration_ms.append(duration_ms)
+            if timing["time_to_first_output_ms"] is not None:
+                successful_ttft_ms.append(timing["time_to_first_output_ms"])
+            if timing["generation_ms"] is not None:
+                successful_generation_ms.append(timing["generation_ms"])
+
         task_results.append(
             {
                 "task_id": task_id,
@@ -136,13 +220,14 @@ def build_reliability_scorecard(
                     "possible": possible,
                     "percent": _percent(earned, possible),
                 },
+                "timing": timing,
             }
         )
 
     total_tasks = len(items)
     provider_observed = provider_successes + provider_failed
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "end_to_end_score": {
             "earned": end_to_end_earned,
             "possible": end_to_end_possible,
@@ -185,6 +270,23 @@ def build_reliability_scorecard(
                 "request itself completed successfully."
             ),
         },
+        "time_performance": {
+            "clock": "client_monotonic",
+            "unit": "milliseconds",
+            "all_observed_requests": _distribution(all_duration_ms),
+            "successful_requests": {
+                "duration_ms": _distribution(successful_duration_ms),
+                "time_to_first_output_ms": _distribution(successful_ttft_ms),
+                "generation_ms": _distribution(successful_generation_ms),
+            },
+            "provider_failed_requests_excluded": provider_failed,
+            "provider_unknown_requests_excluded": provider_unknown,
+            "definition": (
+                "Client-observed monotonic timing distributions. The release policy may apply "
+                "an explicit latency SLO to successful HTTP-2xx request duration p95. Provider "
+                "failures are excluded here and remain visible on the provider axis."
+            ),
+        },
         "outcomes": {
             "pass": outcomes["PASS"],
             "fail": outcomes["FAIL"],
@@ -194,8 +296,8 @@ def build_reliability_scorecard(
         },
         "task_results": task_results,
         "claim_boundary": (
-            "These axes separate answer correctness, answer completion, and provider request "
-            "reliability for this exact run. They do not establish stable quality without "
-            "repeated samples."
+            "These axes separate answer correctness, answer completion, provider request "
+            "reliability, and client-observed timing for this exact run. They do not establish "
+            "stable quality or latency without repeated samples."
         ),
     }
