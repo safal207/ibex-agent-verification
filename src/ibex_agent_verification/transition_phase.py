@@ -11,15 +11,6 @@ class TransitionPhaseError(ValueError):
 
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,159}$")
-_PHASES = {
-    "CALIBRATE",
-    "EXPAND",
-    "COMMIT",
-    "EXECUTE",
-    "VERIFY",
-    "REFLECT",
-    "RECALIBRATE",
-}
 _TOP_LEVEL_KEYS = {
     "schema_version",
     "transition_id",
@@ -160,6 +151,10 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
     }
     if space["origin"] is None:
         raise TransitionPhaseError("space.origin is required")
+    if space["destination"] is not None and space["destination"] == space["origin"]:
+        raise TransitionPhaseError(
+            "space.destination must differ from space.origin for a claimed transition"
+        )
 
     raw_evidence = _object(record.get("evidence"), path="evidence")
     _require_exact_keys(raw_evidence, expected=_EVIDENCE_KEYS, path="evidence")
@@ -216,11 +211,10 @@ def _validate_chronology(time: dict[str, int | None]) -> None:
         raise TransitionPhaseError(
             "time.result_observed_ns requires time.action_started_ns"
         )
-    if time["deadline_ns"] is not None:
-        if time["deadline_ns"] < time["observed_before_ns"]:
-            raise TransitionPhaseError(
-                "time.deadline_ns must not precede time.observed_before_ns"
-            )
+    if time["deadline_ns"] is not None and time["deadline_ns"] < time["observed_before_ns"]:
+        raise TransitionPhaseError(
+            "time.deadline_ns must not precede time.observed_before_ns"
+        )
     if time["evaluated_ns"] < time["observed_before_ns"]:
         raise TransitionPhaseError(
             "time.evaluated_ns must not precede time.observed_before_ns"
@@ -240,19 +234,20 @@ def evaluate_transition(record: dict[str, Any]) -> dict[str, Any]:
     verification = normalized["verification"]
     _validate_chronology(time)
 
-    intent_declared = _all_present(
-        intention,
-        ("intent_id", "statement"),
-    ) and time["intent_declared_ns"] is not None and evidence["intent_ref"] is not None
-    commitment_complete = intent_declared and _all_present(
-        intention,
-        ("action", "expected_result", "stopping_condition"),
-    ) and _all_present(space, ("boundary", "destination")) and time["commit_ns"] is not None
-    if space["destination"] is not None and space["destination"] == space["origin"]:
-        raise TransitionPhaseError(
-            "space.destination must differ from space.origin for a claimed transition"
+    intent_declared = (
+        _all_present(intention, ("intent_id", "statement"))
+        and time["intent_declared_ns"] is not None
+        and evidence["intent_ref"] is not None
+    )
+    commitment_complete = (
+        intent_declared
+        and _all_present(
+            intention,
+            ("action", "expected_result", "stopping_condition"),
         )
-
+        and _all_present(space, ("boundary", "destination"))
+        and time["commit_ns"] is not None
+    )
     execution_observed = (
         commitment_complete
         and time["action_started_ns"] is not None
@@ -263,23 +258,58 @@ def evaluate_transition(record: dict[str, Any]) -> dict[str, Any]:
         and time["result_observed_ns"] is not None
         and evidence["result_ref"] is not None
     )
-    verification_complete = result_observed and _all_present(
-        verification,
-        (
-            "result_matches_expectation",
-            "destination_observed",
-            "stopping_condition_met",
-        ),
-    ) and evidence["verification_ref"] is not None
-
-    deadline_exceeded = (
-        time["deadline_ns"] is not None
-        and time["evaluated_ns"] > time["deadline_ns"]
-        and not verification_complete
+    verification_complete = (
+        result_observed
+        and _all_present(
+            verification,
+            (
+                "result_matches_expectation",
+                "destination_observed",
+                "stopping_condition_met",
+            ),
+        )
+        and evidence["verification_ref"] is not None
     )
+
+    intent_claimed = any(
+        value is not None
+        for value in (
+            intention["intent_id"],
+            intention["statement"],
+            time["intent_declared_ns"],
+            evidence["intent_ref"],
+        )
+    )
+    commit_claimed = time["commit_ns"] is not None
+    execution_claimed = time["action_started_ns"] is not None
+    result_claimed = time["result_observed_ns"] is not None
+    verification_claimed = evidence["verification_ref"] is not None or any(
+        value is not None for value in verification.values()
+    )
+
+    issues: list[str] = []
+    if intent_claimed and not intent_declared:
+        issues.append("intent_claim_without_complete_declaration")
+    if commit_claimed and not commitment_complete:
+        issues.append("commit_without_concrete_step")
+    if execution_claimed and not execution_observed:
+        issues.append("execution_without_action_evidence")
+    if result_claimed and not result_observed:
+        issues.append("result_without_result_evidence")
+    if verification_claimed and not result_observed:
+        issues.append("verification_without_observed_result")
+
+    deadline_exceeded = False
+    if time["deadline_ns"] is not None:
+        deadline_exceeded = (
+            time["result_observed_ns"] is not None
+            and time["result_observed_ns"] > time["deadline_ns"]
+        ) or (
+            not verification_complete and time["evaluated_ns"] > time["deadline_ns"]
+        )
     verification_failed = any(value is False for value in verification.values())
 
-    if deadline_exceeded or verification_failed:
+    if issues or deadline_exceeded or verification_failed:
         phase = "RECALIBRATE"
     elif verification_complete:
         phase = "REFLECT"
@@ -298,16 +328,39 @@ def evaluate_transition(record: dict[str, Any]) -> dict[str, Any]:
     temporal_message = "Temporal order is valid for the observed transition events"
     if deadline_exceeded:
         temporal_status = "BLOCK"
-        temporal_message = "Transition verification was not completed before the declared deadline"
+        temporal_message = "Transition result or verification exceeded the declared deadline"
     elif time["result_observed_ns"] is None:
         temporal_status = "WAIT"
         temporal_message = "The t+ result observation has not been recorded"
 
+    intentional_issue = any(
+        issue
+        in {
+            "intent_claim_without_complete_declaration",
+            "commit_without_concrete_step",
+            "execution_without_action_evidence",
+            "result_without_result_evidence",
+            "verification_without_observed_result",
+        }
+        for issue in issues
+    )
     intentional_status = "PASS"
-    intentional_message = "Declared intention, committed action, expected result, and stopping condition are evidenced"
-    if verification["result_matches_expectation"] is False or verification["stopping_condition_met"] is False:
+    intentional_message = (
+        "Declared intention, committed action, expected result, and stopping condition are evidenced"
+    )
+    if intentional_issue:
         intentional_status = "BLOCK"
-        intentional_message = "Observed result or stopping condition contradicts the committed intention"
+        intentional_message = (
+            "A claimed transition phase lacks the concrete intention or evidence required for it"
+        )
+    elif (
+        verification["result_matches_expectation"] is False
+        or verification["stopping_condition_met"] is False
+    ):
+        intentional_status = "BLOCK"
+        intentional_message = (
+            "Observed result or stopping condition contradicts the committed intention"
+        )
     elif not commitment_complete:
         intentional_status = "WAIT"
         intentional_message = "A concrete pre-action commitment is incomplete"
@@ -315,9 +368,18 @@ def evaluate_transition(record: dict[str, Any]) -> dict[str, Any]:
         intentional_status = "WAIT"
         intentional_message = "Committed intention has not yet been fully verified"
 
+    spatial_claim_failed = commit_claimed and not _all_present(
+        space,
+        ("boundary", "destination"),
+    )
     spatial_status = "PASS"
-    spatial_message = "Origin, crossed boundary, destination, and destination observation are evidenced"
-    if verification["destination_observed"] is False:
+    spatial_message = (
+        "Origin, crossed boundary, destination, and destination observation are evidenced"
+    )
+    if spatial_claim_failed:
+        spatial_status = "BLOCK"
+        spatial_message = "A committed transition lacks a declared boundary or destination"
+    elif verification["destination_observed"] is False:
         spatial_status = "BLOCK"
         spatial_message = "The declared destination was not observed"
     elif not _all_present(space, ("boundary", "destination")):
@@ -353,6 +415,7 @@ def evaluate_transition(record: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "phase": phase,
         "next_phase": next_phase,
+        "issues": issues,
         "axes": {
             "time": {
                 "status": temporal_status,
