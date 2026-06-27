@@ -26,6 +26,26 @@ class TrustedTransitionArtifactWorkflowTests(unittest.TestCase):
         self.assertIn("ProofQA Release Gate Action", SOURCE)
         self.assertIn("ProofQA Transition Source Artifact", TRUSTED)
 
+    def test_pull_request_validation_cannot_publish_receipts(self):
+        validate = TRUSTED.split("  validate:", 1)[1].split("\n  produce:", 1)[0]
+        self.assertIn("contents: read", validate)
+        self.assertNotIn("issues: write", validate)
+        self.assertNotIn("id-token", validate)
+        self.assertNotIn("gh issue comment", validate)
+
+    def test_receipt_publication_follows_upload_and_audit(self):
+        audit = TRUSTED.index("name: Audit final cross-workflow trust chain")
+        upload = TRUSTED.index("name: Upload signed ingested trust chain")
+        publish = TRUSTED.index("name: Publish artifact-ingestion receipt")
+        self.assertLess(audit, upload)
+        self.assertLess(upload, publish)
+        self.assertIn("issues: write", TRUSTED)
+        self.assertIn("steps.upload-trust-chain.outputs.artifact-id", TRUSTED)
+        self.assertIn("steps.upload-trust-chain.outputs.artifact-url", TRUSTED)
+        self.assertIn("steps.upload-trust-chain.outputs.artifact-digest", TRUSTED)
+        self.assertIn("publish_trusted_artifact_ingestion_receipt.py", TRUSTED)
+        self.assertIn("gh issue comment 42", TRUSTED)
+
 
 if __name__ == "__main__":
     unittest.main()
