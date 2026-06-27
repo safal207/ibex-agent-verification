@@ -1,5 +1,4 @@
-import copy
-import io
+import hashlib
 import json
 import stat
 import tempfile
@@ -54,7 +53,7 @@ def artifact_payload(*, digest_value: str = "sha256:" + "b" * 64):
 
 def select(payload=None):
     return select_artifact(
-        api_payload=payload or artifact_payload(),
+        api_payload=artifact_payload() if payload is None else payload,
         expected_repository=REPOSITORY,
         expected_repository_id=REPOSITORY_ID,
         expected_head_repository_id=REPOSITORY_ID,
@@ -68,6 +67,7 @@ def select(payload=None):
 
 
 def build_source(root: Path) -> Path:
+    root.mkdir(parents=True)
     subject = root / "subject.json"
     subject.write_text('{"status":"PASS"}\n', encoding="utf-8")
     source = root / "source"
@@ -95,8 +95,7 @@ def write_zip(source: Path, archive: Path) -> None:
 
 def selection_for_archive(archive: Path):
     payload = artifact_payload(
-        digest_value="sha256:"
-        + __import__("hashlib").sha256(archive.read_bytes()).hexdigest()
+        digest_value="sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
     )
     return select(payload)
 
