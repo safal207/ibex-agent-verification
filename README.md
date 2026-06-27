@@ -1,10 +1,11 @@
 # Ibex Agent Verification
 
-> Deterministic, tamper-evident evidence for pinned silicon experiments and hosted inference runs.
+> Deterministic, tamper-evident evidence for pinned silicon experiments, hosted inference runs, and AI QA release decisions.
 
 [![CI](https://github.com/safal207/ibex-agent-verification/actions/workflows/ci.yml/badge.svg)](https://github.com/safal207/ibex-agent-verification/actions/workflows/ci.yml)
 [![Ibex Verilator E2E](https://github.com/safal207/ibex-agent-verification/actions/workflows/ibex-e2e.yml/badge.svg)](https://github.com/safal207/ibex-agent-verification/actions/workflows/ibex-e2e.yml)
 [![Cerebras Live Evidence](https://github.com/safal207/ibex-agent-verification/actions/workflows/cerebras-live-evidence.yml/badge.svg)](https://github.com/safal207/ibex-agent-verification/actions/workflows/cerebras-live-evidence.yml)
+[![ProofQA Release Gate](https://github.com/safal207/ibex-agent-verification/actions/workflows/proofqa-action.yml/badge.svg)](https://github.com/safal207/ibex-agent-verification/actions/workflows/proofqa-action.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ## Two evidence rails, one verification core
@@ -14,7 +15,7 @@ Ibex RTL + firmware                     hosted inference request
         ↓                                         ↓
 trace + waveform + versions             timestamped stream + usage
         ↓                                         ↓
-normalized reports + causal analysis     deterministic timing analysis
+normalized reports + causal analysis     deterministic timing + QA scoring
         └────────────────┬────────────────────────┘
                          ↓
              manifest + SHA-256 inventory
@@ -22,9 +23,11 @@ normalized reports + causal analysis     deterministic timing analysis
             independent bundle verification
                          ↓
        checksum + provenance + keyless attestation
+                         ↓
+              ProofQA PASS / WARN / BLOCK
 ```
 
-The project preserves exact inputs, observed outputs, versions, timing evidence, and hashes. It does not ask a simulator, agent, provider, benchmark, release asset, or release publisher to be trusted without reviewable evidence.
+The project preserves exact inputs, observed outputs, versions, timing evidence, hashes, and release-policy decisions. It does not ask a simulator, agent, provider, benchmark, release asset, or release publisher to be trusted without reviewable evidence.
 
 ## Confirmed hosted evidence
 
@@ -57,7 +60,7 @@ The Cerebras value records one client-observed API stream. It is not a vendor-wi
 - architectural comparison and evidence-backed timing-cause ranking;
 - reusable `ALLOW`, `BLOCK`, and `ESCALATE` gate decisions.
 
-### Hosted inference rail
+### Hosted inference and AI QA rail
 
 - provider-neutral OpenAI-compatible capture format;
 - monotonic timestamp and terminal-event validation;
@@ -65,7 +68,10 @@ The Cerebras value records one client-observed API stream. It is not a vendor-wi
 - real Cerebras streaming runner with fixed endpoint, disabled retries, disabled TCP warming, and safe response-header allowlisting;
 - TTFT and total client-observed duration;
 - throughput from provider usage plus provider completion timing when reasoning tokens are present;
-- verified `REQUEST_FAILED` evidence for real API, network, and stream failures.
+- verified `REQUEST_FAILED` evidence for real API, network, and stream failures;
+- versioned core and mobile QA suites with deterministic field-level scoring;
+- scorecard v2 separating end-to-end result, answer correctness, completion reliability, and provider reliability;
+- ProofQA composite GitHub Action producing `PASS`, `WARN`, or `BLOCK` from configurable thresholds.
 
 ## Status
 
@@ -75,7 +81,9 @@ This is an early, honest prototype.
 - The first fully green Cerebras live-evidence run completed on 2026-06-26 in [Actions run 28255376630](https://github.com/safal207/ibex-agent-verification/actions/runs/28255376630).
 - Release `v0.8.0` preserves that inference evidence as a deterministic release asset instead of relying only on the original 14-day Actions artifact.
 - Release `v0.8.1` intentionally reuses those immutable evidence bytes to exercise checksum, provenance, post-download byte verification, and keyless Sigstore attestation end to end.
-- No coverage-closure, silicon-signoff, provider-hardware, energy-efficiency, model-quality, or vendor-wide performance claim is made.
+- AI QA scorecard v2 has been exercised on core and mobile suites across two Cerebras-hosted models with independently verified evidence bundles.
+- ProofQA Release Gate is an MVP subpath action; a dedicated repository and immutable Marketplace release remain future work.
+- No coverage-closure, silicon-signoff, provider-hardware, energy-efficiency, general model-quality, or vendor-wide performance claim is made.
 
 ## Quick start
 
@@ -103,6 +111,18 @@ Run the pinned Ibex experiment after installing its external prerequisites:
 bash ./scripts/run_ibex_e2e.sh
 ```
 
+Apply a ProofQA release policy to an existing scorecard v2 summary:
+
+```yaml
+- uses: safal207/ibex-agent-verification/proofqa@<full-commit-sha>
+  with:
+    summary-path: artifacts/qa-benchmark/summary.json
+    min-answer-correctness: "95"
+    min-completion-reliability: "95"
+    min-provider-reliability: "99"
+    fail-on: block
+```
+
 For a live hosted inference run, install the optional SDK and follow [the Cerebras runner guide](docs/CEREBRAS_CLOUD_RUNNER.md). Credentials belong in an environment variable or repository secret, never in request JSON, command arguments, logs, or evidence.
 
 ## Evidence contracts
@@ -127,6 +147,9 @@ The pinned silicon workflow preserves raw traces, FST waveforms, normalized arch
 - [Architecture](docs/ARCHITECTURE.md)
 - [Evidence Bundle Verification](docs/EVIDENCE_BUNDLE_VERIFICATION.md)
 - [Release Artifact Attestations](docs/RELEASE_ATTESTATIONS.md)
+- [AI QA Engineer Verification Suites](docs/AI_QA_ENGINEER_SUITE.md)
+- [Mobile QA Engineer Suite](docs/MOBILE_QA_SUITE.md)
+- [ProofQA GitHub Action](docs/PROOFQA_GITHUB_ACTION.md)
 - [Causal Waveform Adapter](docs/CAUSAL_WAVEFORM_ADAPTER.md)
 - [Timing Root Cause Analysis](docs/TIMING_ANALYSIS.md)
 - [Cerebras Cloud Runner](docs/CEREBRAS_CLOUD_RUNNER.md)
@@ -149,7 +172,9 @@ manifest + hashes + independent verification
         ↓
 release checksum + provenance + keyless signature
         ↓
-human-reviewable decision
+policy threshold evaluation
+        ↓
+human-reviewable PASS / WARN / BLOCK decision
 ```
 
 An agent may propose tests and explanations. It may not declare a processor bug, confirmed timing root cause, hardware property, or provider-wide performance result without preserving the evidence needed to audit that statement.
