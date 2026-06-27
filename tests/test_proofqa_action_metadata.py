@@ -29,11 +29,18 @@ class ProofQAActionMetadataTests(unittest.TestCase):
                 self.assertTrue(line.startswith('description: "'))
                 self.assertTrue(line.endswith('"'))
 
-    def test_action_exposes_quality_time_and_transition_policy(self):
+    def test_action_exposes_quality_transition_manifest_and_attestation_policy(self):
         for input_name in (
             "summary-path:",
             "transition-report-path:",
             "transition-policy:",
+            "transition-manifest-policy:",
+            "transition-evidence-dir:",
+            "transition-manifest-path:",
+            "transition-manifest-receipt-path:",
+            "transition-attestation-bundle-path:",
+            "transition-attestation-repository:",
+            "transition-attestation-signer-workflow:",
             "min-end-to-end:",
             "min-answer-correctness:",
             "min-completion-reliability:",
@@ -61,63 +68,60 @@ class ProofQAActionMetadataTests(unittest.TestCase):
             "transition-status:",
             "transition-phase:",
             "transition-sha256:",
+            "transition-manifest-status:",
+            "transition-manifest-sha256:",
+            "transition-manifest-receipt-sha256:",
+            "transition-attestation-status:",
         ):
             with self.subTest(output_name=output_name):
                 self.assertIn(f"  {output_name}", ACTION)
 
-    def test_composite_runtime_is_pinned_and_preflights_transition(self):
+    def test_composite_runtime_preflights_binds_and_calls_v5_gate(self):
         self.assertIn(
             "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
             ACTION,
         )
         self.assertNotIn("actions/setup-python@v", ACTION)
-        self.assertIn(
-            'python "$GITHUB_ACTION_PATH/../scripts/proofqa_transition_preflight.py"',
-            ACTION,
-        )
-        self.assertIn(
-            'python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate_v4.py"',
-            ACTION,
-        )
+        for script in (
+            "proofqa_transition_preflight.py",
+            "proofqa_transition_manifest.py",
+            "proofqa_gate_v5.py",
+        ):
+            self.assertIn(f'$GITHUB_ACTION_PATH/../scripts/{script}', ACTION)
         self.assertLess(
             ACTION.index("proofqa_transition_preflight.py"),
-            ACTION.index("proofqa_gate_v4.py"),
+            ACTION.index("proofqa_transition_manifest.py"),
         )
-        self.assertIn("PROOFQA_SUMMARY_PATH: ${{ inputs.summary-path }}", ACTION)
+        self.assertLess(
+            ACTION.index("proofqa_transition_manifest.py"),
+            ACTION.index("proofqa_gate_v5.py"),
+        )
         self.assertIn(
-            "PROOFQA_TRANSITION_REPORT_PATH: ${{ inputs.transition-report-path }}",
+            "PROOFQA_TRANSITION_MANIFEST_POLICY: ${{ inputs.transition-manifest-policy }}",
             ACTION,
         )
         self.assertIn(
-            "PROOFQA_TRANSITION_POLICY: ${{ inputs.transition-policy }}",
+            "PROOFQA_TRANSITION_MANIFEST_RECEIPT_PATH: ${{ inputs.transition-manifest-receipt-path }}",
             ACTION,
         )
-        self.assertIn(
-            "PROOFQA_MAX_P95_DURATION_MS: ${{ inputs.max-p95-duration-ms }}",
-            ACTION,
-        )
-        self.assertIn("PROOFQA_FAIL_ON: ${{ inputs.fail-on }}", ACTION)
 
-    def test_smoke_workflow_is_read_only_and_exercises_transition_decisions(self):
+    def test_attestation_verification_is_exact_and_fail_closed(self):
+        self.assertEqual(ACTION.count("gh attestation verify"), 2)
+        self.assertIn('--signer-workflow "$EXPECTED_SIGNER_WORKFLOW"', ACTION)
+        self.assertEqual(ACTION.count("--deny-self-hosted-runners"), 2)
+        self.assertIn('--bundle "$ATTESTATION_BUNDLE"', ACTION)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", ACTION)
+        self.assertNotIn("id-token: write", ACTION)
+        self.assertNotIn("attestations: write", ACTION)
+        self.assertNotIn("actions/attest", ACTION)
+
+    def test_smoke_workflow_remains_read_only(self):
         permissions = WORKFLOW.split("\njobs:", 1)[0]
         self.assertIn("  contents: read", permissions)
         self.assertNotIn("contents: write", permissions)
         self.assertNotIn("id-token: write", permissions)
-        self.assertEqual(WORKFLOW.count("uses: ./proofqa"), 7)
-        self.assertIn("- name: PASS time decision", WORKFLOW)
-        self.assertIn("- name: WARN time decision", WORKFLOW)
-        self.assertIn("- name: BLOCK time decision fails the action", WORKFLOW)
-        self.assertIn(
-            "Preserve v2 compatibility with transition and time gates disabled",
-            WORKFLOW,
-        )
-        self.assertIn("- name: Require VERIFIED transition", WORKFLOW)
-        self.assertIn("Warn on unfinished transition during adoption", WORKFLOW)
-        self.assertIn("Block recalibration under strict transition policy", WORKFLOW)
-        self.assertIn("continue-on-error: true", WORKFLOW)
-        self.assertIn('[[ "$TRANSITION_STATUS" == "VERIFIED" ]]', WORKFLOW)
-        self.assertIn('[[ "$TRANSITION_PHASE" == "EXPAND" ]]', WORKFLOW)
-        self.assertIn('[[ "$STEP_OUTCOME" == "failure" ]]', WORKFLOW)
+        self.assertNotIn("attestations: write", permissions)
+        self.assertIn("uses: ./proofqa", WORKFLOW)
 
     def test_smoke_workflow_uses_pinned_external_actions(self):
         self.assertIn(
