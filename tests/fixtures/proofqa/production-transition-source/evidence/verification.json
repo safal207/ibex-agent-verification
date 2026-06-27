@@ -1,0 +1,22 @@
+{
+  "checks": [
+    "deployment subject digest observed",
+    "production health check passed"
+  ],
+  "destination": {
+    "environment": "production",
+    "identity": "github-environment:production"
+  },
+  "kind": "production-transition-verification",
+  "observed_destination": {
+    "environment": "production",
+    "identity": "github-environment:production"
+  },
+  "release_id": "release-2026-06-27.1",
+  "repository": "safal207/ibex-agent-verification",
+  "schema_version": 1,
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "status": "VERIFIED",
+  "subject_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "transition_id": "deployment/release-2026-06-27.1"
+}

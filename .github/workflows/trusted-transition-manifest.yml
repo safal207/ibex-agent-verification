@@ -6,15 +6,19 @@ on:
       - ".github/workflows/trusted-transition-manifest.yml"
       - "scripts/proofqa_transition_manifest*.py"
       - "scripts/trusted_transition_reference.py"
+      - "scripts/production_transition_source.py"
       - "scripts/publish_trusted_transition_receipt.py"
       - "proofqa/action.yml"
       - "tests/test_proofqa_transition_manifest*.py"
       - "tests/test_trusted_transition_manifest_workflow.py"
       - "tests/test_trusted_transition_reference.py"
+      - "tests/test_production_transition_source.py"
       - "tests/test_publish_trusted_transition_receipt.py"
       - "tests/fixtures/proofqa/transition-manifest-bundle/**"
+      - "tests/fixtures/proofqa/production-transition-source/**"
       - "docs/PROOFQA_GITHUB_ACTION.md"
       - "docs/TRUSTED_TRANSITION_MANIFEST_PRODUCER.md"
+      - "docs/PRODUCTION_TRANSITION_SOURCE_CONTRACT.md"
       - "README.md"
   workflow_run:
     workflows: ["ProofQA Release Gate Action"]
@@ -48,6 +52,7 @@ jobs:
             tests.test_proofqa_transition_manifest_builder \
             tests.test_trusted_transition_manifest_workflow \
             tests.test_trusted_transition_reference \
+            tests.test_production_transition_source \
             tests.test_publish_trusted_transition_receipt
       - name: Rebuild and verify reference manifest
         shell: bash

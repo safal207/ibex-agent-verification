@@ -1,0 +1,15 @@
+{
+  "deployment_id": "deploy-2026-06-27-001",
+  "destination": {
+    "environment": "production",
+    "identity": "github-environment:production"
+  },
+  "kind": "production-transition-result",
+  "release_id": "release-2026-06-27.1",
+  "repository": "safal207/ibex-agent-verification",
+  "schema_version": 1,
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "status": "SUCCEEDED",
+  "subject_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "transition_id": "deployment/release-2026-06-27.1"
+}
