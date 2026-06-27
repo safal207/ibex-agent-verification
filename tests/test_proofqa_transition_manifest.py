@@ -160,9 +160,19 @@ class ProofQATransitionManifestTests(unittest.TestCase):
             bundle = root / "attestation.sigstore.json"
             online = root / "online.json"
             bundled = root / "bundled.json"
-            bundle.write_text('{"dsseEnvelope":{"payload":"test"}}\n')
-            online.write_text('[{"verificationResult":"verified"}]\n')
-            bundled.write_text('[{"verificationResult":"verified"}]\n')
+            bundle.write_text(
+                '{"dsseEnvelope":{"payload":"test"}}\n',
+                encoding="utf-8",
+            )
+            online.write_text(
+                '[{"verificationResult":"verified"}]\n',
+                encoding="utf-8",
+            )
+            bundled.write_text(
+                '[{"verificationResult":"verified"}]\n',
+                encoding="utf-8",
+            )
+            expected_bundle_sha = sha256_file(bundle)
 
             finalized = finalize_attestation(
                 receipt_path=receipt_path,
@@ -180,7 +190,7 @@ class ProofQATransitionManifestTests(unittest.TestCase):
         self.assertTrue(finalized["attestation"]["deny_self_hosted_runners"])
         self.assertEqual(
             finalized["attestation"]["bundle_sha256"],
-            sha256_file(bundle),
+            expected_bundle_sha,
         )
 
 
