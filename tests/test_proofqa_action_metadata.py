@@ -12,10 +12,22 @@ WORKFLOW = (ROOT / ".github/workflows/proofqa-action.yml").read_text(
 
 class ProofQAActionMetadataTests(unittest.TestCase):
     def test_proofqa_is_a_separate_subpath_action(self):
-        self.assertIn("name: ProofQA Release Gate", ACTION)
-        self.assertIn('using: composite', ACTION)
+        self.assertIn('name: "ProofQA Release Gate"', ACTION)
+        self.assertIn('using: "composite"', ACTION)
         self.assertIn("PythiaLabs Silicon Evidence Gate", ROOT_ACTION)
         self.assertNotIn("ProofQA Release Gate", ROOT_ACTION)
+
+    def test_descriptions_are_quoted_for_github_manifest_parser(self):
+        descriptions = [
+            line.strip()
+            for line in ACTION.splitlines()
+            if line.strip().startswith("description:")
+        ]
+        self.assertGreater(len(descriptions), 5)
+        for line in descriptions:
+            with self.subTest(line=line):
+                self.assertTrue(line.startswith('description: "'))
+                self.assertTrue(line.endswith('"'))
 
     def test_action_exposes_four_axis_thresholds_and_enforcement(self):
         for input_name in (
