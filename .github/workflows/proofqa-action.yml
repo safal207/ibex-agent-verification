@@ -7,6 +7,7 @@ on:
       - "proofqa/action.yml"
       - "scripts/proofqa_gate.py"
       - "scripts/proofqa_gate_v3.py"
+      - "scripts/proofqa_gate_v4.py"
       - "src/ibex_agent_verification/qa_scorecard.py"
       - "scripts/qa_benchmark.py"
       - "tests/test_proofqa*.py"
@@ -19,6 +20,7 @@ on:
       - "proofqa/action.yml"
       - "scripts/proofqa_gate.py"
       - "scripts/proofqa_gate_v3.py"
+      - "scripts/proofqa_gate_v4.py"
       - "src/ibex_agent_verification/qa_scorecard.py"
       - "scripts/qa_benchmark.py"
       - "tests/test_proofqa*.py"
@@ -55,6 +57,7 @@ jobs:
           END_TO_END: ${{ steps.pass.outputs.end-to-end-percent }}
           COMPLETION: ${{ steps.pass.outputs.completion-reliability-percent }}
           P95_MS: ${{ steps.pass.outputs.p95-duration-ms }}
+          TRANSITION_STATUS: ${{ steps.pass.outputs.transition-status }}
         shell: bash
         run: |
           set -euo pipefail
@@ -63,6 +66,7 @@ jobs:
           [[ "$END_TO_END" == "100.000000" ]]
           [[ "$COMPLETION" == "100.000000" ]]
           [[ "$P95_MS" == "700.000000" ]]
+          [[ "$TRANSITION_STATUS" == "n/a" ]]
           [[ -s artifacts/proofqa-time-pass.json ]]
 
       - name: WARN time decision without failing block-only enforcement
@@ -125,28 +129,130 @@ jobs:
           assert blocked[0]["threshold"] == 1000.0
           PY
 
-      - name: Preserve v2 compatibility with time gate disabled
+      - name: Preserve v2 compatibility with transition and time gates disabled
         id: legacy
         uses: ./proofqa
         with:
           summary-path: tests/fixtures/proofqa/summary-pass.json
           max-p95-duration-ms: "0"
+          transition-policy: ignore
           report-path: artifacts/proofqa-v2-compatible.json
 
       - name: Verify v2 compatibility
         env:
           DECISION: ${{ steps.legacy.outputs.decision }}
           P95_MS: ${{ steps.legacy.outputs.p95-duration-ms }}
+          TRANSITION_STATUS: ${{ steps.legacy.outputs.transition-status }}
+          TRANSITION_SHA: ${{ steps.legacy.outputs.transition-sha256 }}
         shell: bash
         run: |
           set -euo pipefail
           [[ "$DECISION" == "PASS" ]]
           [[ "$P95_MS" == "n/a" ]]
+          [[ "$TRANSITION_STATUS" == "n/a" ]]
+          [[ "$TRANSITION_SHA" == "n/a" ]]
+
+      - name: Require VERIFIED transition
+        id: transition-pass
+        uses: ./proofqa
+        with:
+          summary-path: tests/fixtures/proofqa/summary-time-pass.json
+          max-p95-duration-ms: "1000"
+          transition-report-path: tests/fixtures/proofqa/transition-verified.json
+          transition-policy: require-verified
+          report-path: artifacts/proofqa-transition-pass.json
+
+      - name: Verify transition PASS outputs
+        env:
+          DECISION: ${{ steps.transition-pass.outputs.decision }}
+          TRANSITION_STATUS: ${{ steps.transition-pass.outputs.transition-status }}
+          TRANSITION_PHASE: ${{ steps.transition-pass.outputs.transition-phase }}
+          TRANSITION_SHA: ${{ steps.transition-pass.outputs.transition-sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DECISION" == "PASS" ]]
+          [[ "$TRANSITION_STATUS" == "VERIFIED" ]]
+          [[ "$TRANSITION_PHASE" == "REFLECT" ]]
+          [[ "$TRANSITION_SHA" =~ ^[0-9a-f]{64}$ ]]
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/proofqa-transition-pass.json").read_text())
+          assert report["schema_version"] == 3
+          assert report["transition"]["status"] == "VERIFIED"
+          assert report["findings"][-1]["axis"] == "transition_phase"
+          assert report["findings"][-1]["status"] == "PASS"
+          PY
+
+      - name: Warn on unfinished transition during adoption
+        id: transition-warn
+        uses: ./proofqa
+        with:
+          summary-path: tests/fixtures/proofqa/summary-time-pass.json
+          max-p95-duration-ms: "1000"
+          transition-report-path: tests/fixtures/proofqa/transition-in-progress.json
+          transition-policy: warn
+          fail-on: block
+          report-path: artifacts/proofqa-transition-warn.json
+
+      - name: Verify transition WARN outputs
+        env:
+          DECISION: ${{ steps.transition-warn.outputs.decision }}
+          SHOULD_FAIL: ${{ steps.transition-warn.outputs.should-fail }}
+          TRANSITION_STATUS: ${{ steps.transition-warn.outputs.transition-status }}
+          TRANSITION_PHASE: ${{ steps.transition-warn.outputs.transition-phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DECISION" == "WARN" ]]
+          [[ "$SHOULD_FAIL" == "false" ]]
+          [[ "$TRANSITION_STATUS" == "IN_PROGRESS" ]]
+          [[ "$TRANSITION_PHASE" == "EXPAND" ]]
+
+      - name: Block recalibration under strict transition policy
+        id: transition-block
+        continue-on-error: true
+        uses: ./proofqa
+        with:
+          summary-path: tests/fixtures/proofqa/summary-time-pass.json
+          max-p95-duration-ms: "1000"
+          transition-report-path: tests/fixtures/proofqa/transition-recalibrate.json
+          transition-policy: require-verified
+          report-path: artifacts/proofqa-transition-block.json
+
+      - name: Verify transition BLOCK is isolated from model axes
+        env:
+          STEP_OUTCOME: ${{ steps.transition-block.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$STEP_OUTCOME" == "failure" ]]
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/proofqa-transition-block.json").read_text())
+          assert report["decision"] == "BLOCK"
+          assert report["transition"]["status"] == "RECALIBRATE"
+          blocked = [
+              finding
+              for finding in report["findings"]
+              if finding["status"] == "BLOCK"
+          ]
+          assert [finding["axis"] for finding in blocked] == ["transition_phase"]
+          assert all(
+              finding["status"] == "PASS"
+              for finding in report["findings"]
+              if finding["axis"] != "transition_phase"
+          )
+          PY
 
       - name: Upload gate reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: proofqa-time-axis-reports-${{ github.sha }}
+          name: proofqa-transition-gate-reports-${{ github.sha }}
           path: artifacts/proofqa-*.json
           if-no-files-found: error
           retention-days: 14
