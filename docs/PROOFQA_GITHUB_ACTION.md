@@ -1,6 +1,6 @@
 # ProofQA Release Gate GitHub Action
 
-ProofQA converts a deterministic QA scorecard v2 or v3 and, optionally, one Transition Phase Contract report into a CI decision:
+ProofQA converts one deterministic QA scorecard, an optional Transition Phase Contract report, and optional manifest-bound transition evidence into:
 
 ```text
 PASS
@@ -8,55 +8,48 @@ WARN
 BLOCK
 ```
 
-The gate keeps six concerns separate instead of blending them into one model-quality number:
+The gate keeps independent concerns separate:
 
 - end-to-end score;
-- answer correctness on completed strict-JSON tasks;
+- answer correctness;
 - completion reliability;
 - provider reliability;
-- client-observed time performance;
-- transition readiness across time, intention, and space.
+- client-observed time;
+- transition readiness across time, intention, and space;
+- integrity and signer identity of transition evidence.
 
-Scorecard v3 measures time. The transition report answers a different question: whether the claimed movement from one state or context to another is complete and safe to continue.
+Evidence integrity is never blended into model-quality percentages. Modified evidence is invalid input, not a low model score.
 
-## Usage
-
-The repository has a separate root silicon action, so ProofQA is exposed from the `proofqa` subdirectory:
+## Basic usage
 
 ```yaml
 - name: Evaluate AI QA release evidence
   id: proofqa
   uses: safal207/ibex-agent-verification/proofqa@<full-commit-sha>
   with:
-    summary-path: artifacts/mobile-v0-1/gpt-oss-120b/qa-benchmark/summary.json
+    summary-path: artifacts/qa-benchmark/summary.json
     transition-report-path: artifacts/release-transition-report.json
     transition-policy: require-verified
     policy-name: mobile-production
-    min-end-to-end: "90"
     min-answer-correctness: "95"
     min-completion-reliability: "95"
     min-provider-reliability: "99"
-    warn-margin: "3"
     max-p95-duration-ms: "2000"
-    time-warn-margin-ms: "250"
-    unknown-metric-policy: block
     fail-on: block
     report-path: artifacts/proofqa-gate-report.json
 ```
 
-Pin the action to a full commit SHA. A future dedicated `proofqa-action` repository can publish immutable releases without replacing the existing root silicon action.
+Pin the action to a full commit SHA.
 
 ## Transition policy
 
-`transition-policy` has three modes:
-
 | Mode | Transition report | Effect |
 |---|---|---|
-| `ignore` | not required | transition finding is disabled; preserves old pipelines |
-| `warn` | required | `VERIFIED` passes; `IN_PROGRESS` or `RECALIBRATE` produces `WARN` |
-| `require-verified` | required | only `VERIFIED` passes; other states produce `BLOCK` |
+| `ignore` | not required | transition finding disabled |
+| `warn` | required | unfinished or recalibrating transition produces `WARN` |
+| `require-verified` | required | only a structurally consistent `VERIFIED` transition passes |
 
-A `VERIFIED` label is not accepted by itself. The action also requires:
+A `VERIFIED` label alone is insufficient. ProofQA also requires:
 
 ```text
 phase: REFLECT
@@ -67,216 +60,201 @@ intention.status: PASS
 space.status: PASS
 ```
 
-This prevents a report from hiding an unfinished or contradictory transition behind a single optimistic status field.
-
-For `IN_PROGRESS`, only `CALIBRATE`, `EXPAND`, `COMMIT`, `EXECUTE`, or `VERIFY` are allowed and no axis may be `BLOCK`.
-
-For `RECALIBRATE`, the report must use:
+The preflight requires phase-appropriate evidence depth:
 
 ```text
-phase: RECALIBRATE
-next_phase: CALIBRATE
+EXPAND  → intent_ref
+EXECUTE → intent_ref + action_ref
+VERIFY  → intent_ref + action_ref + result_ref
+REFLECT → intent_ref + action_ref + result_ref + verification_ref
 ```
 
-and contain at least one issue or one blocked axis.
+`IN_PROGRESS` cannot contain issues or a blocked axis. `RECALIBRATE` must return to `CALIBRATE` and contain an issue or blocked axis.
 
-### Gradual adoption
+## Transition manifest policy
 
-Start by surfacing unfinished transitions without blocking production:
+`transition-manifest-policy` adds byte-level evidence binding.
+
+| Mode | Manifest | Attestation | Effect |
+|---|---|---|---|
+| `ignore` | not required | not required | backward-compatible transition behavior |
+| `verify` | required | not required | verifies exact local inventory and canonical refs |
+| `require-attested` | required | required | additionally verifies signer identity online and from a supplied Sigstore bundle |
+
+A manifest-enabled transition report uses canonical references:
+
+```json
+{
+  "evidence": {
+    "intent_ref": "manifest:evidence/intent.json",
+    "action_ref": "manifest:evidence/action.json",
+    "result_ref": "manifest:evidence/result.json",
+    "verification_ref": "manifest:evidence/verification.json"
+  }
+}
+```
+
+The transition report itself must also be listed in the same manifest. This closes the substitution gap where evidence files could stay unchanged while the report pointing to them was replaced.
+
+Each manifest entry contains exactly:
+
+```json
+{
+  "path": "evidence/result.json",
+  "size_bytes": 82,
+  "sha256": "<64 lowercase hexadecimal characters>"
+}
+```
+
+Strict verification rejects:
+
+- absolute, non-canonical, backslash, `.` or `..` paths;
+- duplicate manifest entries;
+- missing, modified, symlinked, escaping, or unlisted files;
+- a manifest listing itself;
+- a transition report absent from the inventory;
+- refs without the `manifest:` scheme;
+- refs to files absent from the inventory;
+- one file reused for multiple evidence roles;
+- a receipt whose transition digest no longer matches the consumed report.
+
+### Verified local manifest
 
 ```yaml
-with:
-  transition-report-path: artifacts/release-transition-report.json
-  transition-policy: warn
-  fail-on: block
+permissions:
+  contents: read
+
+steps:
+  - uses: safal207/ibex-agent-verification/proofqa@<full-commit-sha>
+    with:
+      summary-path: artifacts/qa-benchmark/summary.json
+      transition-report-path: artifacts/transition-bundle/transition-report.json
+      transition-policy: require-verified
+      transition-manifest-policy: verify
+      transition-evidence-dir: artifacts/transition-bundle
+      transition-manifest-path: artifacts/transition-bundle/manifest.json
+      transition-manifest-receipt-path: artifacts/transition-manifest-receipt.json
+      report-path: artifacts/proofqa-gate-report.json
 ```
 
-The overall decision becomes `WARN`, but block-only enforcement keeps the workflow green.
-
-Move to strict continuation control when report generation is stable:
+### Attested manifest
 
 ```yaml
-with:
-  transition-report-path: artifacts/release-transition-report.json
-  transition-policy: require-verified
-  fail-on: block
+permissions:
+  contents: read
+  attestations: read
+
+steps:
+  - uses: safal207/ibex-agent-verification/proofqa@<full-commit-sha>
+    with:
+      summary-path: artifacts/qa-benchmark/summary.json
+      transition-report-path: artifacts/transition-bundle/transition-report.json
+      transition-policy: require-verified
+      transition-manifest-policy: require-attested
+      transition-evidence-dir: artifacts/transition-bundle
+      transition-manifest-path: artifacts/transition-bundle/manifest.json
+      transition-manifest-receipt-path: artifacts/transition-manifest-receipt.json
+      transition-attestation-bundle-path: artifacts/transition-manifest.sigstore.json
+      transition-attestation-repository: owner/repository
+      transition-attestation-signer-workflow: owner/repository/.github/workflows/transition-evidence.yml
+      report-path: artifacts/proofqa-gate-report.json
 ```
 
-Now `IN_PROGRESS` and `RECALIBRATE` fail the action even when every scorecard and time axis passes.
-
-## Time-axis semantics
-
-Scorecard v3 derives time from monotonic timestamps inside each preserved inference capture. It does not use total GitHub job duration, SDK installation time, configured cooldown, or unrelated workflow queue time.
-
-It records deterministic distributions for:
-
-- total client-observed request duration;
-- time to first output;
-- generation time after first output.
-
-Each distribution contains:
+The action runs both forms of verification:
 
 ```text
-count
-minimum
-p50
-p95
-maximum
+gh attestation verify manifest.json --repo ... --signer-workflow ... --deny-self-hosted-runners
+gh attestation verify manifest.json --repo ... --signer-workflow ... --deny-self-hosted-runners --bundle ...
 ```
 
-Percentiles use linear interpolation over ordered observed values.
+Both commands must succeed. Their JSON reports and the Sigstore bundle are hashed into the transition-manifest receipt.
 
-The release gate applies `max-p95-duration-ms` to successful HTTP-2xx request duration. Provider failures are excluded from latency and remain visible on the provider-reliability axis. A fast HTTP 429 therefore does not improve the time result. A truncated HTTP-2xx request may satisfy the time SLO while still failing completion reliability.
+`require-attested` verifies an existing attestation; it does not mint one. The trusted producer workflow should create the manifest only after its evidence is final, attest that exact manifest with OIDC, preserve the bundle, and publish both without modification.
 
-This separation allows a report such as:
+## Time policy
 
-```text
-Answer correctness:      100% PASS
-Completion reliability:  100% PASS
-Provider reliability:    100% PASS
-Successful p95 duration:  900 ms PASS
-Transition phase:        RECALIBRATE BLOCK
-```
-
-The model and provider passed, but the declared release transition is not safe to continue.
-
-## Time decisions
+Scorecard v3 derives time from monotonic timestamps inside preserved inference captures. It excludes job queue time, SDK installation, cooldowns, and unrelated workflow work.
 
 For an enabled time policy:
 
 1. p95 above `max-p95-duration-ms` produces `BLOCK`;
-2. p95 at or below the maximum but above `maximum - time-warn-margin-ms` produces `WARN`;
-3. p95 below the warning band produces `PASS`;
+2. p95 inside the configured warning band produces `WARN`;
+3. p95 below the band produces `PASS`;
 4. missing p95 follows `unknown-metric-policy`.
 
-Set:
-
-```yaml
-max-p95-duration-ms: "0"
-```
-
-to disable the time gate. This preserves compatibility with scorecard v2 summaries, which do not contain timing distributions.
+Set `max-p95-duration-ms: "0"` to disable time gating and preserve scorecard v2 compatibility.
 
 ## Workflow enforcement
 
-### Observe without failing
-
-```yaml
-with:
-  fail-on: never
-```
-
-The action still emits a decision, writes the report, adds the Actions summary, and exposes outputs. It does not fail the workflow.
-
-### Block failed policy only
-
-```yaml
-with:
-  fail-on: block
-```
-
-`WARN` remains visible. `BLOCK` exits non-zero.
-
-### Treat warning as failure
-
-```yaml
-with:
-  fail-on: warn
-```
-
-Both `WARN` and `BLOCK` fail the action.
+| `fail-on` | Behavior |
+|---|---|
+| `never` | emits decision and reports without failing |
+| `block` | only `BLOCK` fails |
+| `warn` | `WARN` and `BLOCK` fail |
 
 ## Inputs
 
 | Input | Default | Meaning |
 |---|---:|---|
-| `summary-path` | required | ProofQA `summary.json` with scorecard v2 or v3 |
-| `transition-report-path` | empty | Transition Phase Contract verification report |
+| `summary-path` | required | scorecard v2 or v3 summary |
+| `transition-report-path` | empty | Transition Phase Contract report |
 | `transition-policy` | `ignore` | `ignore`, `warn`, or `require-verified` |
-| `policy-name` | `default` | name stored in report and Actions summary |
-| `min-end-to-end` | `90` | minimum strict full-denominator score |
-| `min-answer-correctness` | `90` | minimum correctness on completed answers |
-| `min-completion-reliability` | `95` | minimum percentage producing valid JSON |
-| `min-provider-reliability` | `95` | minimum successful known provider outcomes |
-| `warn-margin` | `3` | warning band above percentage minimums |
-| `max-p95-duration-ms` | `0` | maximum successful-request p95; zero disables time gate |
-| `time-warn-margin-ms` | `250` | warning band below the p95 maximum |
-| `unknown-metric-policy` | `block` | `block`, `warn`, or `ignore` for null metrics |
+| `transition-manifest-policy` | `ignore` | `ignore`, `verify`, or `require-attested` |
+| `transition-evidence-dir` | empty | exact bundle root |
+| `transition-manifest-path` | empty | manifest inside the bundle root |
+| `transition-manifest-receipt-path` | `proofqa-transition-manifest-receipt.json` | local integrity and attestation receipt |
+| `transition-attestation-bundle-path` | empty | Sigstore bundle for the manifest |
+| `transition-attestation-repository` | current repository | expected attestation owner/repository |
+| `transition-attestation-signer-workflow` | empty | exact allowed signer workflow identity |
+| `policy-name` | `default` | policy identity stored in reports |
+| `min-end-to-end` | `90` | minimum end-to-end percentage |
+| `min-answer-correctness` | `90` | minimum completed-answer correctness |
+| `min-completion-reliability` | `95` | minimum valid-completion percentage |
+| `min-provider-reliability` | `95` | minimum provider success percentage |
+| `warn-margin` | `3` | percentage warning band |
+| `max-p95-duration-ms` | `0` | maximum successful-request p95 |
+| `time-warn-margin-ms` | `250` | time warning band |
+| `unknown-metric-policy` | `block` | `block`, `warn`, or `ignore` |
 | `fail-on` | `block` | `block`, `warn`, or `never` |
-| `report-path` | `proofqa-gate-report.json` | machine-readable report destination |
-
-Percentage inputs must be finite values from `0` through `100`. Time inputs must be finite non-negative millisecond values up to one hour.
+| `report-path` | `proofqa-gate-report.json` | final machine-readable report |
 
 ## Outputs
 
+Alongside the scorecard and transition outputs, the action exposes:
+
 | Output | Example |
 |---|---|
-| `decision` | `PASS`, `WARN`, or `BLOCK` |
-| `should-fail` | `true` or `false` |
-| `report-path` | `artifacts/proofqa-gate-report.json` |
-| `summary-sha256` | 64-character SHA-256 |
-| `end-to-end-percent` | `96.551724` or `n/a` |
-| `answer-correctness-percent` | `100.000000` or `n/a` |
-| `completion-reliability-percent` | `60.000000` or `n/a` |
-| `provider-reliability-percent` | `80.000000` or `n/a` |
-| `p95-duration-ms` | `900.000000` or `n/a` |
-| `transition-status` | `VERIFIED`, `IN_PROGRESS`, `RECALIBRATE`, or `n/a` |
-| `transition-phase` | `REFLECT`, `EXPAND`, `RECALIBRATE`, or `n/a` |
-| `transition-sha256` | 64-character SHA-256 or `n/a` |
+| `transition-manifest-status` | `VERIFIED` or `n/a` |
+| `transition-manifest-sha256` | manifest SHA-256 or `n/a` |
+| `transition-manifest-receipt-sha256` | receipt SHA-256 or `n/a` |
+| `transition-attestation-status` | `VERIFIED`, `NOT_REQUIRED`, or `n/a` |
 
-## Gate report v3
+## Gate report v4
 
-The generated JSON binds:
+The final report binds:
 
-- percentage, time, and transition policies;
-- final decision and enforcement result;
-- all observed scorecard metrics;
-- one finding per independent axis;
-- suite, provider, model, and scorecard identity;
-- source summary path and SHA-256;
-- transition report path, identity, phase, status, and SHA-256 when enabled;
-- the claim boundary.
+- scorecard source path and SHA-256;
+- transition report identity and SHA-256;
+- transition-manifest receipt path and SHA-256;
+- manifest path, SHA-256, and file count;
+- all four role-to-file bindings with path, size, and SHA-256;
+- attestation repository, exact signer workflow, bundle digest, and online/bundled verification-report digests when required;
+- independent policy findings and the final decision.
 
-The transition axis is never blended into the numeric score. A strict transition failure can therefore block continuation without pretending that model correctness changed.
+A transition integrity failure occurs before policy evaluation and therefore does not create a normal gate report. This prevents corrupted evidence from being represented as an ordinary `BLOCK` result.
 
-The report can be uploaded as a workflow artifact or included in a larger release evidence manifest.
+## Security boundary
 
-## Fail-closed behavior
+The action requests no write permission and never calls `actions/attest`. It only verifies already-produced evidence. `require-attested` uses the current GitHub token for read-only attestation lookup; callers must grant `attestations: read`.
 
-The action returns configuration error exit code `2` when:
+The local manifest verifier proves exact bytes in the supplied directory. The attestation verifier proves that the manifest bytes were signed by the explicitly allowed hosted workflow identity. Neither claim proves that the real world changed beyond the contents of the supplied evidence files.
 
-- `summary-path` is missing;
-- a non-ignored transition policy lacks `transition-report-path`;
-- a source is not a regular non-symlink file;
-- JSON is malformed;
-- scorecard version/schema pairing is invalid;
-- transition status, phase, next phase, issues, or axes are inconsistent;
-- a metric is not finite or falls outside its permitted range;
-- a policy value is invalid;
-- the generated report would overwrite either source report.
-
-A malformed evidence contract cannot become a permissive `PASS`.
-
-## Security and claim boundary
-
-The action:
-
-- requests no repository write permissions;
-- requires no `GITHUB_TOKEN` or provider credential;
-- uses a pinned Python setup action;
-- reads one scorecard and optionally one transition report;
-- hashes both consumed reports;
-- writes one machine-readable gate report;
-- publishes policy and evidence identities to the Actions summary.
-
-The action validates the internal Transition Phase Contract and binds the report bytes by SHA-256. It does not independently verify the external evidence references inside that transition report. Stronger continuation claims should include the transition report and its referenced evidence in a verified manifest or signed release bundle.
-
-It also does not rerun the model or prove stable latency from one small sample. Stable latency and quality claims require repeated runs, controlled environments, sample-size disclosure, and trend analysis.
+Stable quality and latency claims still require repeated, versioned runs, controlled environments, sample-size disclosure, and trend analysis.
 
 ## Next increments
 
-1. require the transition report and referenced evidence inside one verified manifest;
-2. compare candidate time distributions against a signed baseline;
-3. aggregate repeated runs and confidence intervals;
+1. create a trusted post-CI workflow that builds and attests production transition manifests;
+2. publish manifest, Sigstore bundle, and final ProofQA report as one immutable release unit;
+3. compare candidate distributions against signed baselines;
 4. aggregate multiple suites, models, and transitions into one release decision;
-5. publish a dedicated immutable action repository and Marketplace release.
+5. publish a dedicated immutable Marketplace action.
