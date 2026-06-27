@@ -63,6 +63,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          set +e
           ibex-av verify-transition-phase \
             --record examples/transition-phase/expanding.json \
             --report artifacts/transition-in-progress.json
@@ -83,6 +84,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          set +e
           ibex-av verify-transition-phase \
             --record examples/transition-phase/recalibrate-missing-step.json \
             --report artifacts/transition-recalibrate.json
@@ -115,6 +117,7 @@ jobs:
           source["intention"]["hidden_motive"] = "must-not-be-inferred"
           Path("artifacts/transition-invalid.json").write_text(json.dumps(source))
           PY
+          set +e
           ibex-av verify-transition-phase \
             --record artifacts/transition-invalid.json \
             --report artifacts/transition-invalid-report.json
