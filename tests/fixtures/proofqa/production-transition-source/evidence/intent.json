@@ -1,0 +1,13 @@
+{
+  "destination": {
+    "environment": "production",
+    "identity": "github-environment:production"
+  },
+  "kind": "production-transition-intent",
+  "release_id": "release-2026-06-27.1",
+  "repository": "safal207/ibex-agent-verification",
+  "schema_version": 1,
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "statement": "Deploy the exact approved release subject to the bound production destination.",
+  "transition_id": "deployment/release-2026-06-27.1"
+}
