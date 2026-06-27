@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "transition_id": "checkout.payment-recovery/731",
+  "time": {
+    "observed_before_ns": 100,
+    "intent_declared_ns": 120,
+    "commit_ns": 140,
+    "action_started_ns": 160,
+    "result_observed_ns": 220,
+    "evaluated_ns": 240,
+    "deadline_ns": 300
+  },
+  "intention": {
+    "intent_id": "resume-confirmed-payment",
+    "statement": "Recover the committed payment without submitting it again.",
+    "action": "Fetch payment 731 and render the server-confirmed state.",
+    "expected_result": "Payment 731 is shown as paid exactly once.",
+    "stopping_condition": "The paid state is verified and no retry is emitted."
+  },
+  "space": {
+    "origin": "mobile.checkout.submitting",
+    "boundary": "process-restart-and-server-reconciliation",
+    "destination": "mobile.payment.success/731"
+  },
+  "evidence": {
+    "intent_ref": "sha256:intent-731",
+    "action_ref": "trace:payment-get-731",
+    "result_ref": "response:payment-731-paid",
+    "verification_ref": "assertion:no-duplicate-submit"
+  },
+  "verification": {
+    "result_matches_expectation": true,
+    "destination_observed": true,
+    "stopping_condition_met": true
+  }
+}
