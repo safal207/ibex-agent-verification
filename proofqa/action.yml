@@ -105,6 +105,13 @@ runs:
       with:
         python-version: "3.12"
 
+    - name: "Preflight transition evidence"
+      shell: bash
+      env:
+        PROOFQA_TRANSITION_REPORT_PATH: ${{ inputs.transition-report-path }}
+        PROOFQA_TRANSITION_POLICY: ${{ inputs.transition-policy }}
+      run: python "$GITHUB_ACTION_PATH/../scripts/proofqa_transition_preflight.py"
+
     - name: "Evaluate ProofQA release policy"
       id: gate
       shell: bash
