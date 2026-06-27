@@ -76,7 +76,7 @@ def _sha256(path: Path) -> str:
 def _parse_percent(value: str, *, name: str) -> float:
     try:
         parsed = float(value)
-    except ValueError as error:
+    except (TypeError, ValueError) as error:
         raise ProofQAGateError(f"{name} must be a number from 0 through 100") from error
     if not math.isfinite(parsed) or not 0.0 <= parsed <= 100.0:
         raise ProofQAGateError(f"{name} must be a finite number from 0 through 100")
@@ -212,7 +212,12 @@ def evaluate_gate(
             )
         else:
             status = "PASS"
-            message = f"{label} {actual:.6f}% satisfies the policy" if actual is not None else message
+            if actual is None:
+                message = (
+                    f"{label} is unavailable and ignored by unknown-metric-policy=ignore"
+                )
+            else:
+                message = f"{label} {actual:.6f}% satisfies the policy"
 
         decision = _max_decision(decision, status)
         findings.append(
@@ -282,6 +287,10 @@ def _display_percent(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.6f}%"
 
 
+def _output_percent(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.6f}"
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     icon = {"PASS": "✅", "WARN": "⚠️", "BLOCK": "🛑"}[report["decision"]]
     policy = report["policy"]
@@ -321,12 +330,12 @@ def _write_outputs(path: Path, report: dict[str, Any], report_path: Path) -> Non
         "should-fail": str(report["should_fail"]).lower(),
         "report-path": str(report_path),
         "summary-sha256": report["source"]["summary_sha256"],
-        "end-to-end-percent": _display_percent(metrics["end_to_end"]),
-        "answer-correctness-percent": _display_percent(metrics["answer_correctness"]),
-        "completion-reliability-percent": _display_percent(
+        "end-to-end-percent": _output_percent(metrics["end_to_end"]),
+        "answer-correctness-percent": _output_percent(metrics["answer_correctness"]),
+        "completion-reliability-percent": _output_percent(
             metrics["completion_reliability"]
         ),
-        "provider-reliability-percent": _display_percent(
+        "provider-reliability-percent": _output_percent(
             metrics["provider_reliability"]
         ),
     }
@@ -346,9 +355,19 @@ def run(environment: Mapping[str, str]) -> int:
     summary_path = Path(summary_raw)
     report_path = Path(report_raw)
     if report_path.is_symlink() or report_path.is_dir():
-        raise ProofQAGateError(f"report-path must be a writable regular-file path: {report_path}")
+        raise ProofQAGateError(
+            f"report-path must be a writable regular-file path: {report_path}"
+        )
 
     summary = _load_json_object(summary_path, label="ProofQA summary")
+    summary_resolved = summary_path.resolve(strict=True)
+    report_resolved = report_path.resolve(strict=False)
+    same_existing_file = report_path.exists() and os.path.samefile(
+        summary_resolved, report_path
+    )
+    if report_resolved == summary_resolved or same_existing_file:
+        raise ProofQAGateError("report-path must differ from summary-path")
+
     policy = policy_from_environment(environment)
     evaluation = evaluate_gate(summary=summary, policy=policy)
     report = build_report(
