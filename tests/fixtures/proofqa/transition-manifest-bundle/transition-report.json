@@ -1,0 +1,26 @@
+{
+  "axes": {
+    "intention": {
+      "status": "PASS"
+    },
+    "space": {
+      "status": "PASS"
+    },
+    "time": {
+      "status": "PASS"
+    }
+  },
+  "claim_boundary": "Fixture proves only local manifest binding for one release transition.",
+  "evidence": {
+    "action_ref": "manifest:evidence/action.json",
+    "intent_ref": "manifest:evidence/intent.json",
+    "result_ref": "manifest:evidence/result.json",
+    "verification_ref": "manifest:evidence/verification.json"
+  },
+  "issues": [],
+  "next_phase": "CONTINUE",
+  "phase": "REFLECT",
+  "schema_version": 1,
+  "status": "VERIFIED",
+  "transition_id": "release/mobile-production-manifest"
+}

@@ -1,0 +1,30 @@
+{
+  "files": [
+    {
+      "path": "evidence/action.json",
+      "sha256": "2d21a4d2b419558280d142a0f072f88e0efd5511ebce5225031c893d663fa41a",
+      "size_bytes": 87
+    },
+    {
+      "path": "evidence/intent.json",
+      "sha256": "4659c7226ce734fa76d2c1fa955e282518230c17108127958814c256da7d2c3e",
+      "size_bytes": 121
+    },
+    {
+      "path": "evidence/result.json",
+      "sha256": "3dd20f48d3cea2f5b3d5e2d8dae3823390a89a240fcced484e64b34b9aaa209e",
+      "size_bytes": 82
+    },
+    {
+      "path": "evidence/verification.json",
+      "sha256": "9f872f9c6c6f2d7c393def19f8f2627e0e59db86e1c2365f357b1b9ac4eabf62",
+      "size_bytes": 101
+    },
+    {
+      "path": "transition-report.json",
+      "sha256": "b086d469b933a1cc3963851d7f6f975453bbf2e47b0760a2c22af380a00d6406",
+      "size_bytes": 657
+    }
+  ],
+  "schema_version": 1
+}

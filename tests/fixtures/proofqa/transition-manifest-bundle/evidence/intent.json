@@ -1,0 +1,4 @@
+{
+  "intent_id": "release-mobile-production",
+  "statement": "Release only after verified QA and transition evidence."
+}

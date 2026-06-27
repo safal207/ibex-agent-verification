@@ -28,10 +28,12 @@ normalized reports + causal analysis     deterministic timing + QA scoring
                          ↓
   transition policy across time, intention, and space
                          ↓
+ manifest-bound intent / action / result / verification
+                         ↓
              PASS / WARN / BLOCK
 ```
 
-The project preserves exact inputs, observed outputs, versions, timing evidence, hashes, transition evidence, and release-policy decisions. A simulator, agent, provider, benchmark, release asset, or release publisher is not trusted without reviewable evidence.
+The project preserves exact inputs, outputs, versions, timing evidence, hashes, transition evidence, and release-policy decisions. A simulator, agent, provider, benchmark, release asset, transition report, or publisher is not trusted without reviewable evidence.
 
 ## Confirmed hosted evidence
 
@@ -49,8 +51,7 @@ The Cerebras value records one client-observed API stream. It is not a vendor-wi
 - deterministic reports and exit codes;
 - manifest inventories with byte sizes and SHA-256;
 - fail-closed rejection of malformed paths, symlinks, missing files, modified files, and unlisted additions;
-- independent verification with `ibex-av verify-evidence`;
-- commit-bound GitHub Actions artifacts and release evidence;
+- independent bundle verification;
 - deterministic release ZIPs with checksum and provenance sidecars;
 - byte-for-byte verification after GitHub Release download;
 - OIDC-backed keyless Sigstore attestations bound to repository workflow identity.
@@ -62,31 +63,34 @@ The Cerebras value records one client-observed API stream. It is not a vendor-wi
 - raw FST waveform preservation;
 - RVFI and interface-handshake alignment;
 - architectural comparison and evidence-backed timing-cause ranking;
-- reusable `ALLOW`, `BLOCK`, and `ESCALATE` gate decisions.
+- reusable `ALLOW`, `BLOCK`, and `ESCALATE` decisions.
 
 ### Hosted inference and AI QA rail
 
 - provider-neutral OpenAI-compatible capture format;
 - monotonic timestamp and terminal-event validation;
 - recursive secret-field rejection;
-- real Cerebras streaming runner with fixed endpoint, disabled retries, disabled TCP warming, and safe response-header allowlisting;
+- real Cerebras streaming runner with fixed endpoint, disabled retries, disabled TCP warming, and safe header allowlisting;
 - TTFT and total client-observed duration;
 - provider-timed throughput when trustworthy completion timing exists;
-- verified `REQUEST_FAILED` evidence for API, network, and stream failures;
+- verified `REQUEST_FAILED` evidence;
 - versioned core and mobile QA suites with deterministic field-level scoring;
 - scorecard v3 separating end-to-end result, correctness, completion, provider reliability, and time;
-- ProofQA composite action producing `PASS`, `WARN`, or `BLOCK` from configurable policies.
+- ProofQA composite action producing `PASS`, `WARN`, or `BLOCK` from independent policies.
 
-### Transition phase rail
+### Transition phase and evidence rail
 
 - explicit `t− → t0 → t+` chronology;
 - intention declaration before commitment;
 - concrete action, expected result, and stopping condition at commit;
 - origin, crossed boundary, destination, and destination observation;
-- fail-closed rejection of backward chronology and execution before commitment;
 - `IN_PROGRESS`, `VERIFIED`, or `RECALIBRATE` outcomes;
-- ProofQA policies `ignore`, `warn`, and `require-verified` for gradual or strict continuation control;
-- structural rejection of forged `VERIFIED` reports whose phase, issues, or axes do not converge.
+- transition policies `ignore`, `warn`, and `require-verified`;
+- structural rejection of forged `VERIFIED` reports;
+- manifest policies `ignore`, `verify`, and `require-attested`;
+- canonical `manifest:<path>` refs for intent, action, result, and verification;
+- exact path, size, and SHA-256 checks for every evidence file and the transition report itself;
+- online and bundled attestation verification from one explicit signer workflow with self-hosted runners denied.
 
 ## Status
 
@@ -94,12 +98,12 @@ This is an early, honest prototype.
 
 - The first hosted Ibex E2E and causal-waveform runs completed on 2026-06-24.
 - The first fully green Cerebras live-evidence run completed on 2026-06-26 in [Actions run 28255376630](https://github.com/safal207/ibex-agent-verification/actions/runs/28255376630).
-- Release `v0.8.0` preserves that inference evidence as a deterministic release asset.
-- Release `v0.8.1` reuses those immutable bytes to exercise checksum, provenance, post-download verification, and keyless attestation end to end.
+- Release `v0.8.0` preserves hosted inference evidence as a deterministic release asset.
+- Release `v0.8.1` exercises checksum, provenance, post-download verification, and keyless attestation end to end.
 - AI QA scorecard v3 includes independent correctness, completion, provider, and time diagnostics.
 - Transition Phase Contract v1 verifies movement across time, intention, and space.
-- ProofQA Release Gate v4 can require a structurally consistent `VERIFIED` transition before deployment or autonomous continuation.
-- A dedicated immutable Marketplace action remains future work.
+- ProofQA Release Gate v5 can require a verified transition whose four evidence roles resolve to exact manifest-listed bytes.
+- `require-attested` verifies an already-produced manifest attestation; a trusted production manifest producer remains the next workflow increment.
 - No coverage-closure, silicon-signoff, provider-hardware, energy-efficiency, general model-quality, stable-latency, or vendor-wide performance claim is made.
 
 ## Quick start
@@ -114,14 +118,6 @@ make test
 make demo
 ```
 
-Verify the committed Cerebras milestone:
-
-```bash
-ibex-av verify-evidence \
-  --manifest docs/evidence/releases/v0.8.0/cerebras-live/bundle/manifest.json \
-  --report /tmp/cerebras-live-verification.json
-```
-
 Verify a declared transition:
 
 ```bash
@@ -130,20 +126,31 @@ ibex-av verify-transition-phase \
   --report /tmp/payment-recovery-transition-report.json
 ```
 
-Require both model evidence and a verified transition:
+Require a verified transition and exact local manifest bytes:
 
 ```yaml
-- uses: safal207/ibex-agent-verification/proofqa@<full-commit-sha>
-  with:
-    summary-path: artifacts/qa-benchmark/summary.json
-    transition-report-path: artifacts/release-transition-report.json
-    transition-policy: require-verified
-    min-answer-correctness: "95"
-    min-completion-reliability: "95"
-    min-provider-reliability: "99"
-    max-p95-duration-ms: "2000"
-    fail-on: block
+permissions:
+  contents: read
+
+steps:
+  - uses: safal207/ibex-agent-verification/proofqa@<full-commit-sha>
+    with:
+      summary-path: artifacts/qa-benchmark/summary.json
+      transition-report-path: artifacts/transition-bundle/transition-report.json
+      transition-policy: require-verified
+      transition-manifest-policy: verify
+      transition-evidence-dir: artifacts/transition-bundle
+      transition-manifest-path: artifacts/transition-bundle/manifest.json
+      transition-manifest-receipt-path: artifacts/transition-manifest-receipt.json
+      min-answer-correctness: "95"
+      min-completion-reliability: "95"
+      min-provider-reliability: "99"
+      max-p95-duration-ms: "2000"
+      fail-on: block
+      report-path: artifacts/proofqa-gate-report.json
 ```
+
+For an attested manifest, grant `attestations: read`, set `transition-manifest-policy: require-attested`, and provide the Sigstore bundle plus the exact allowed signer workflow.
 
 Run the pinned Ibex experiment after installing its external prerequisites:
 
@@ -155,8 +162,6 @@ For a live hosted inference run, install the optional SDK and follow [the Cerebr
 
 ## Evidence contracts
 
-A hosted inference capture starts with `request_start`, records optional safe headers and ordered chunks, and ends with exactly one `request_end` or `request_error`. Timestamps use a monotonic clock and may not move backward.
-
 A successful inference bundle contains:
 
 ```text
@@ -166,11 +171,20 @@ raw/request.json
 raw/capture.jsonl
 ```
 
-For reasoning-model streams, the analyzer prefers provider-reported `completion_time`. If reasoning tokens exist without provider completion timing, it refuses to publish a misleading throughput value.
+A strict transition bundle contains at least:
 
-The pinned silicon workflow preserves raw traces, FST waveforms, normalized architectural and causal reports, tool versions, commands, manifests, and verification reports.
+```text
+manifest.json
+transition-report.json
+evidence/intent.json
+evidence/action.json
+evidence/result.json
+evidence/verification.json
+```
 
-A transition record preserves explicit chronology, intention, spatial boundary, destination, verification booleans, and opaque evidence references. ProofQA validates the transition report's internal contract and binds its bytes by SHA-256; verification of the referenced external evidence remains a separate manifest responsibility.
+The manifest excludes itself but must list the transition report and all referenced evidence files. ProofQA verifies that the directory contains no unlisted additions.
+
+For `require-attested`, the action performs both online and supplied-bundle verification of the manifest with `gh attestation verify`, binds those verification reports into a receipt, and then binds that receipt into gate report schema v4.
 
 ## Documentation
 
@@ -201,15 +215,13 @@ real simulator, oracle, or hosted endpoint
         ↓
 raw outputs + normalized evidence + versions
         ↓
-manifest + hashes + independent verification
+manifest + exact hashes + independent verification
         ↓
-release checksum + provenance + keyless signature
+optional exact-workflow keyless attestation
         ↓
-quality, reliability, and time policy
-        ↓
-transition verification across t− / t0 / t+
+quality, reliability, time, and transition policy
         ↓
 human-reviewable continuation, recalibration, or block
 ```
 
-An agent may propose tests and explanations. It may not declare a processor bug, confirmed timing root cause, completed state transition, presence in a destination, hardware property, or provider-wide performance result without preserving the evidence needed to audit that statement.
+An agent may propose tests and explanations. It may not declare a processor bug, confirmed timing root cause, completed transition, presence in a destination, verified evidence chain, hardware property, or provider-wide performance result without preserving the bytes needed to audit that statement.

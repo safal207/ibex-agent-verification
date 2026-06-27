@@ -1,6 +1,6 @@
 name: "ProofQA Release Gate"
 author: "Aleksei Safonov"
-description: "Evidence-first PASS, WARN, or BLOCK gate for ProofQA scorecards and optional transition reports."
+description: "Evidence-first PASS, WARN, or BLOCK gate for scorecards, transitions, and manifest-bound evidence."
 
 inputs:
   summary-path:
@@ -14,6 +14,34 @@ inputs:
     description: "Transition enforcement mode. One of ignore, warn, or require-verified."
     required: false
     default: "ignore"
+  transition-manifest-policy:
+    description: "Evidence binding mode. One of ignore, verify, or require-attested."
+    required: false
+    default: "ignore"
+  transition-evidence-dir:
+    description: "Root directory containing the transition report, manifest, and evidence files."
+    required: false
+    default: ""
+  transition-manifest-path:
+    description: "Manifest inventory inside transition-evidence-dir."
+    required: false
+    default: ""
+  transition-manifest-receipt-path:
+    description: "Destination for the verified transition-manifest receipt."
+    required: false
+    default: "proofqa-transition-manifest-receipt.json"
+  transition-attestation-bundle-path:
+    description: "Sigstore bundle for the manifest when transition-manifest-policy is require-attested."
+    required: false
+    default: ""
+  transition-attestation-repository:
+    description: "Expected owner/repository for manifest attestation; defaults to the current repository."
+    required: false
+    default: ""
+  transition-attestation-signer-workflow:
+    description: "Exact owner/repository/.github/workflows/file.yml identity allowed to sign the manifest."
+    required: false
+    default: ""
   policy-name:
     description: "Human-readable policy name included in the gate report."
     required: false
@@ -96,6 +124,18 @@ outputs:
   transition-sha256:
     description: "SHA-256 digest of the evaluated transition report or n/a."
     value: ${{ steps.gate.outputs.transition-sha256 }}
+  transition-manifest-status:
+    description: "Verified transition manifest status or n/a."
+    value: ${{ steps.gate.outputs.transition-manifest-status }}
+  transition-manifest-sha256:
+    description: "SHA-256 digest of the verified transition manifest or n/a."
+    value: ${{ steps.gate.outputs.transition-manifest-sha256 }}
+  transition-manifest-receipt-sha256:
+    description: "SHA-256 digest of the transition manifest receipt or n/a."
+    value: ${{ steps.gate.outputs.transition-manifest-receipt-sha256 }}
+  transition-attestation-status:
+    description: "Transition manifest attestation status or n/a."
+    value: ${{ steps.gate.outputs.transition-attestation-status }}
 
 runs:
   using: "composite"
@@ -112,6 +152,77 @@ runs:
         PROOFQA_TRANSITION_POLICY: ${{ inputs.transition-policy }}
       run: python "$GITHUB_ACTION_PATH/../scripts/proofqa_transition_preflight.py"
 
+    - name: "Bind transition references to manifest bytes"
+      if: inputs.transition-manifest-policy != 'ignore'
+      shell: bash
+      env:
+        EVIDENCE_DIR: ${{ inputs.transition-evidence-dir }}
+        MANIFEST_PATH: ${{ inputs.transition-manifest-path }}
+        TRANSITION_REPORT_PATH: ${{ inputs.transition-report-path }}
+        MANIFEST_POLICY: ${{ inputs.transition-manifest-policy }}
+        RECEIPT_PATH: ${{ inputs.transition-manifest-receipt-path }}
+        REPORT_PATH: ${{ inputs.report-path }}
+      run: |
+        set -euo pipefail
+        [[ -n "$EVIDENCE_DIR" ]]
+        [[ -n "$MANIFEST_PATH" ]]
+        [[ -n "$TRANSITION_REPORT_PATH" ]]
+        [[ -n "$RECEIPT_PATH" ]]
+        [[ -n "$REPORT_PATH" ]]
+        evidence_root="$(realpath "$EVIDENCE_DIR")"
+        receipt_resolved="$(realpath -m "$RECEIPT_PATH")"
+        report_resolved="$(realpath -m "$REPORT_PATH")"
+        for output_path in "$receipt_resolved" "$report_resolved"; do
+          if [[ "$output_path" == "$evidence_root" || "$output_path" == "$evidence_root/"* ]]; then
+            echo "Derived ProofQA outputs must be outside transition-evidence-dir" >&2
+            exit 2
+          fi
+        done
+        python "$GITHUB_ACTION_PATH/../scripts/proofqa_transition_manifest.py" verify \
+          --evidence-dir "$EVIDENCE_DIR" \
+          --manifest "$MANIFEST_PATH" \
+          --transition-report "$TRANSITION_REPORT_PATH" \
+          --policy "$MANIFEST_POLICY" \
+          --receipt "$RECEIPT_PATH"
+
+    - name: "Verify transition manifest attestation online and from bundle"
+      if: inputs.transition-manifest-policy == 'require-attested'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        MANIFEST_PATH: ${{ inputs.transition-manifest-path }}
+        RECEIPT_PATH: ${{ inputs.transition-manifest-receipt-path }}
+        ATTESTATION_BUNDLE: ${{ inputs.transition-attestation-bundle-path }}
+        EXPECTED_REPOSITORY: ${{ inputs.transition-attestation-repository }}
+        EXPECTED_SIGNER_WORKFLOW: ${{ inputs.transition-attestation-signer-workflow }}
+      run: |
+        set -euo pipefail
+        repository="${EXPECTED_REPOSITORY:-$GITHUB_REPOSITORY}"
+        [[ -n "$EXPECTED_SIGNER_WORKFLOW" ]]
+        [[ -s "$MANIFEST_PATH" ]]
+        [[ -s "$ATTESTATION_BUNDLE" ]]
+        mkdir -p "$(dirname "$RECEIPT_PATH")"
+        online_report="${RECEIPT_PATH}.attestation-online.json"
+        bundled_report="${RECEIPT_PATH}.attestation-bundled.json"
+        gh attestation verify "$MANIFEST_PATH" \
+          --repo "$repository" \
+          --signer-workflow "$EXPECTED_SIGNER_WORKFLOW" \
+          --deny-self-hosted-runners \
+          --format json > "$online_report"
+        gh attestation verify "$MANIFEST_PATH" \
+          --repo "$repository" \
+          --signer-workflow "$EXPECTED_SIGNER_WORKFLOW" \
+          --deny-self-hosted-runners \
+          --bundle "$ATTESTATION_BUNDLE" \
+          --format json > "$bundled_report"
+        python "$GITHUB_ACTION_PATH/../scripts/proofqa_transition_manifest.py" finalize-attestation \
+          --receipt "$RECEIPT_PATH" \
+          --online-report "$online_report" \
+          --bundled-report "$bundled_report" \
+          --attestation-bundle "$ATTESTATION_BUNDLE" \
+          --repository "$repository" \
+          --signer-workflow "$EXPECTED_SIGNER_WORKFLOW"
+
     - name: "Evaluate ProofQA release policy"
       id: gate
       shell: bash
@@ -119,6 +230,8 @@ runs:
         PROOFQA_SUMMARY_PATH: ${{ inputs.summary-path }}
         PROOFQA_TRANSITION_REPORT_PATH: ${{ inputs.transition-report-path }}
         PROOFQA_TRANSITION_POLICY: ${{ inputs.transition-policy }}
+        PROOFQA_TRANSITION_MANIFEST_POLICY: ${{ inputs.transition-manifest-policy }}
+        PROOFQA_TRANSITION_MANIFEST_RECEIPT_PATH: ${{ inputs.transition-manifest-receipt-path }}
         PROOFQA_POLICY_NAME: ${{ inputs.policy-name }}
         PROOFQA_MIN_END_TO_END: ${{ inputs.min-end-to-end }}
         PROOFQA_MIN_ANSWER_CORRECTNESS: ${{ inputs.min-answer-correctness }}
@@ -130,8 +243,8 @@ runs:
         PROOFQA_UNKNOWN_METRIC_POLICY: ${{ inputs.unknown-metric-policy }}
         PROOFQA_FAIL_ON: ${{ inputs.fail-on }}
         PROOFQA_REPORT_PATH: ${{ inputs.report-path }}
-      run: python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate_v4.py"
+      run: python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate_v5.py"
 
 branding:
-  icon: "git-merge"
+  icon: "shield"
   color: "blue"
