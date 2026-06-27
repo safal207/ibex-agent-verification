@@ -19,7 +19,10 @@
     }
   },
   "evidence": {
-    "intent_ref": "note:mobile-production-release"
+    "intent_ref": "note:mobile-production-release",
+    "action_ref": null,
+    "result_ref": null,
+    "verification_ref": null
   },
   "claim_boundary": "Fixture represents a release transition that must recalibrate before continuation."
 }
