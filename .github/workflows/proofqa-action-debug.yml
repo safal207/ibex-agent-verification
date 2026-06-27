@@ -1,0 +1,55 @@
+name: ProofQA Remote Action Debug
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/proofqa-action-debug.yml"
+      - "proofqa/action.yml"
+      - "scripts/proofqa_gate.py"
+
+permissions:
+  contents: read
+
+jobs:
+  remote-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Create minimal scorecard v2
+        shell: bash
+        run: |
+          cat > summary.json <<'JSON'
+          {
+            "suite_id": "debug-suite-v0.1",
+            "provider": "debug-provider",
+            "model": "debug-model",
+            "scorecard_version": 2,
+            "scorecard": {
+              "schema_version": 1,
+              "end_to_end_score": {"percent": 100.0},
+              "answer_correctness": {"percent": 100.0},
+              "completion_reliability": {"percent": 100.0},
+              "provider_reliability": {"percent": 100.0}
+            }
+          }
+          JSON
+
+      - name: Invoke branch action as a remote consumer
+        id: proofqa
+        continue-on-error: true
+        uses: safal207/ibex-agent-verification/proofqa@feat/proofqa-release-gate-action
+        with:
+          summary-path: summary.json
+          report-path: proofqa-debug-report.json
+
+      - name: Expose remote action outcome
+        if: always()
+        env:
+          OUTCOME: ${{ steps.proofqa.outcome }}
+          DECISION: ${{ steps.proofqa.outputs.decision }}
+        shell: bash
+        run: |
+          echo "outcome=$OUTCOME"
+          echo "decision=$DECISION"
+          find . -maxdepth 2 -type f -print
+          [[ "$OUTCOME" == "success" ]]
