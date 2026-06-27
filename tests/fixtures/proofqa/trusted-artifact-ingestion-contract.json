@@ -10,7 +10,10 @@
     "source-provenance.json",
     "transition-report.json"
   ],
+  "final_artifact_name_template": "trusted-transition-ingested-{source_commit}",
   "manifest_signer_workflow": ".github/workflows/trusted-transition-artifact.yml",
-  "schema_version": 1,
+  "receipt_issue": 42,
+  "receipt_type": "trusted-transition-artifact-ingestion-receipt",
+  "schema_version": 2,
   "source_workflow": ".github/workflows/proofqa-transition-source.yml"
 }
