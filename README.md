@@ -1,6 +1,6 @@
 # Ibex Agent Verification
 
-> Deterministic, tamper-evident evidence for pinned silicon experiments, hosted inference runs, and AI QA release decisions.
+> Deterministic, tamper-evident evidence for pinned silicon experiments, hosted inference runs, AI QA release decisions, and agent state transitions.
 
 [![CI](https://github.com/safal207/ibex-agent-verification/actions/workflows/ci.yml/badge.svg)](https://github.com/safal207/ibex-agent-verification/actions/workflows/ci.yml)
 [![Ibex Verilator E2E](https://github.com/safal207/ibex-agent-verification/actions/workflows/ibex-e2e.yml/badge.svg)](https://github.com/safal207/ibex-agent-verification/actions/workflows/ibex-e2e.yml)
@@ -25,9 +25,12 @@ normalized reports + causal analysis     deterministic timing + QA scoring
        checksum + provenance + keyless attestation
                          ↓
               ProofQA PASS / WARN / BLOCK
+                         ↓
+       transition verification across time,
+              intention, and space
 ```
 
-The project preserves exact inputs, observed outputs, versions, timing evidence, hashes, and release-policy decisions. It does not ask a simulator, agent, provider, benchmark, release asset, or release publisher to be trusted without reviewable evidence.
+The project preserves exact inputs, observed outputs, versions, timing evidence, hashes, transition evidence, and release-policy decisions. It does not ask a simulator, agent, provider, benchmark, release asset, or release publisher to be trusted without reviewable evidence.
 
 ## Confirmed hosted evidence
 
@@ -70,8 +73,17 @@ The Cerebras value records one client-observed API stream. It is not a vendor-wi
 - throughput from provider usage plus provider completion timing when reasoning tokens are present;
 - verified `REQUEST_FAILED` evidence for real API, network, and stream failures;
 - versioned core and mobile QA suites with deterministic field-level scoring;
-- scorecard v2 separating end-to-end result, answer correctness, completion reliability, and provider reliability;
+- scorecard v3 separating end-to-end result, answer correctness, completion reliability, provider reliability, and client-observed time;
 - ProofQA composite GitHub Action producing `PASS`, `WARN`, or `BLOCK` from configurable thresholds.
+
+### Transition phase rail
+
+- explicit `t− → t0 → t+` chronology;
+- intention declaration before commitment;
+- concrete action, expected result, and stopping condition at commit;
+- origin, crossed boundary, destination, and destination observation;
+- fail-closed rejection of backward chronology and execution before commitment;
+- `IN_PROGRESS`, `VERIFIED`, or `RECALIBRATE` outcomes without inferring hidden intent or fabricated presence.
 
 ## Status
 
@@ -81,9 +93,10 @@ This is an early, honest prototype.
 - The first fully green Cerebras live-evidence run completed on 2026-06-26 in [Actions run 28255376630](https://github.com/safal207/ibex-agent-verification/actions/runs/28255376630).
 - Release `v0.8.0` preserves that inference evidence as a deterministic release asset instead of relying only on the original 14-day Actions artifact.
 - Release `v0.8.1` intentionally reuses those immutable evidence bytes to exercise checksum, provenance, post-download byte verification, and keyless Sigstore attestation end to end.
-- AI QA scorecard v2 has been exercised on core and mobile suites across two Cerebras-hosted models with independently verified evidence bundles.
+- AI QA scorecard v3 includes independent correctness, completion, provider, and time diagnostics.
 - ProofQA Release Gate is an MVP subpath action; a dedicated repository and immutable Marketplace release remain future work.
-- No coverage-closure, silicon-signoff, provider-hardware, energy-efficiency, general model-quality, or vendor-wide performance claim is made.
+- Transition Phase Contract v1 verifies one declared movement across time, intention, and space; integration into the release action remains a later increment.
+- No coverage-closure, silicon-signoff, provider-hardware, energy-efficiency, general model-quality, stable-latency, or vendor-wide performance claim is made.
 
 ## Quick start
 
@@ -105,13 +118,21 @@ ibex-av verify-evidence \
   --report /tmp/cerebras-live-verification.json
 ```
 
+Verify a declared transition:
+
+```bash
+ibex-av verify-transition-phase \
+  --record examples/transition-phase/payment-recovery-verified.json \
+  --report /tmp/payment-recovery-transition-report.json
+```
+
 Run the pinned Ibex experiment after installing its external prerequisites:
 
 ```bash
 bash ./scripts/run_ibex_e2e.sh
 ```
 
-Apply a ProofQA release policy to an existing scorecard v2 summary:
+Apply a ProofQA release policy to an existing scorecard v2 or v3 summary:
 
 ```yaml
 - uses: safal207/ibex-agent-verification/proofqa@<full-commit-sha>
@@ -120,6 +141,7 @@ Apply a ProofQA release policy to an existing scorecard v2 summary:
     min-answer-correctness: "95"
     min-completion-reliability: "95"
     min-provider-reliability: "99"
+    max-p95-duration-ms: "2000"
     fail-on: block
 ```
 
@@ -142,6 +164,8 @@ For reasoning-model streams, the analyzer prefers provider-reported `completion_
 
 The pinned silicon workflow preserves raw traces, FST waveforms, normalized architectural and causal reports, tool versions, commands, manifests, and verification reports.
 
+A transition record preserves explicit chronology, intention, spatial boundary, destination, verification booleans, and opaque evidence references. The validator checks internal consistency but does not replace outer evidence verification.
+
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
@@ -150,6 +174,7 @@ The pinned silicon workflow preserves raw traces, FST waveforms, normalized arch
 - [AI QA Engineer Verification Suites](docs/AI_QA_ENGINEER_SUITE.md)
 - [Mobile QA Engineer Suite](docs/MOBILE_QA_SUITE.md)
 - [ProofQA GitHub Action](docs/PROOFQA_GITHUB_ACTION.md)
+- [Transition Phase Contract](docs/TRANSITION_PHASE_CONTRACT.md)
 - [Causal Waveform Adapter](docs/CAUSAL_WAVEFORM_ADAPTER.md)
 - [Timing Root Cause Analysis](docs/TIMING_ANALYSIS.md)
 - [Cerebras Cloud Runner](docs/CEREBRAS_CLOUD_RUNNER.md)
@@ -161,6 +186,8 @@ The pinned silicon workflow preserves raw traces, FST waveforms, normalized arch
 
 ```text
 agent or human proposal
+        ↓
+explicit intention and concrete commitment
         ↓
 deterministic workload and configuration
         ↓
@@ -174,11 +201,9 @@ release checksum + provenance + keyless signature
         ↓
 policy threshold evaluation
         ↓
-human-reviewable PASS / WARN / BLOCK decision
+transition verification across t− / t0 / t+
+        ↓
+human-reviewable continuation, recalibration, or block
 ```
 
-An agent may propose tests and explanations. It may not declare a processor bug, confirmed timing root cause, hardware property, or provider-wide performance result without preserving the evidence needed to audit that statement.
-
-## Licensing and independence
-
-Ibex is a lowRISC project and is licensed under Apache License 2.0 unless otherwise noted. This repository is also Apache-2.0 licensed. It is independent and is not endorsed by lowRISC, Cerebras, or any other provider.
+An agent may propose tests and explanations. It may not declare a processor bug, confirmed timing root cause, completed state transition, presence in a destination, hardware property, or provider-wide performance result without preserving the evidence needed to audit that statement.
