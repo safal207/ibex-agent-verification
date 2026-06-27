@@ -2,7 +2,6 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from copy import deepcopy
 from io import StringIO
 from pathlib import Path
 
@@ -143,6 +142,23 @@ class TransitionPhaseTests(unittest.TestCase):
         with self.assertRaisesRegex(TransitionPhaseError, "requires time.commit_ns"):
             evaluate_transition(record)
 
+    def test_orphaned_action_reference_recalibrates(self):
+        record = verified_record()
+        record["time"]["action_started_ns"] = None
+        record["time"]["result_observed_ns"] = None
+        record["evidence"]["result_ref"] = None
+        record["evidence"]["verification_ref"] = None
+        record["verification"] = {
+            "result_matches_expectation": None,
+            "destination_observed": None,
+            "stopping_condition_met": None,
+        }
+
+        result = evaluate_transition(record)
+        self.assertEqual(result["status"], "RECALIBRATE")
+        self.assertIn("execution_without_action_evidence", result["issues"])
+        self.assertEqual(result["axes"]["intention"]["status"], "BLOCK")
+
     def test_late_result_recalibrates_time_axis(self):
         record = verified_record()
         record["time"]["deadline_ns"] = 200
@@ -159,6 +175,17 @@ class TransitionPhaseTests(unittest.TestCase):
         self.assertEqual(result["axes"]["time"]["status"], "PASS")
         self.assertEqual(result["axes"]["intention"]["status"], "PASS")
 
+    def test_destination_claim_without_verification_reference_never_passes(self):
+        record = verified_record()
+        record["evidence"]["verification_ref"] = None
+        result = evaluate_transition(record)
+        self.assertEqual(result["status"], "RECALIBRATE")
+        self.assertIn(
+            "verification_claim_without_complete_evidence",
+            result["issues"],
+        )
+        self.assertEqual(result["axes"]["space"]["status"], "BLOCK")
+
     def test_destination_cannot_equal_origin(self):
         record = verified_record()
         record["space"]["destination"] = record["space"]["origin"]
@@ -174,6 +201,43 @@ class TransitionPhaseTests(unittest.TestCase):
     def test_partial_intent_claim_recalibrates_instead_of_fabricating_intent(self):
         record = verified_record()
         record["intention"]["statement"] = None
+        result = evaluate_transition(record)
+        self.assertEqual(result["status"], "RECALIBRATE")
+        self.assertIn(
+            "intent_claim_without_complete_declaration",
+            result["issues"],
+        )
+
+    def test_orphaned_action_text_without_intent_declaration_recalibrates(self):
+        record = verified_record()
+        record["intention"].update(
+            {
+                "intent_id": None,
+                "statement": None,
+            }
+        )
+        record["time"].update(
+            {
+                "intent_declared_ns": None,
+                "commit_ns": None,
+                "action_started_ns": None,
+                "result_observed_ns": None,
+            }
+        )
+        record["evidence"].update(
+            {
+                "intent_ref": None,
+                "action_ref": None,
+                "result_ref": None,
+                "verification_ref": None,
+            }
+        )
+        record["verification"] = {
+            "result_matches_expectation": None,
+            "destination_observed": None,
+            "stopping_condition_met": None,
+        }
+
         result = evaluate_transition(record)
         self.assertEqual(result["status"], "RECALIBRATE")
         self.assertIn(
