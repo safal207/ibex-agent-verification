@@ -1,0 +1,123 @@
+name: ProofQA Release Gate Action
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/proofqa-action.yml"
+      - "proofqa/action.yml"
+      - "scripts/proofqa_gate.py"
+      - "tests/test_proofqa_gate.py"
+      - "tests/test_proofqa_action_metadata.py"
+      - "tests/fixtures/proofqa/**"
+      - "docs/PROOFQA_GITHUB_ACTION.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/proofqa-action.yml"
+      - "proofqa/action.yml"
+      - "scripts/proofqa_gate.py"
+      - "tests/test_proofqa_gate.py"
+      - "tests/test_proofqa_action_metadata.py"
+      - "tests/fixtures/proofqa/**"
+      - "docs/PROOFQA_GITHUB_ACTION.md"
+
+permissions:
+  contents: read
+
+jobs:
+  action-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out action source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: PASS decision
+        id: pass
+        uses: ./proofqa
+        with:
+          summary-path: tests/fixtures/proofqa/summary-pass.json
+          policy-name: mobile-production
+          report-path: artifacts/proofqa-pass.json
+
+      - name: Verify PASS outputs
+        env:
+          DECISION: ${{ steps.pass.outputs.decision }}
+          SHOULD_FAIL: ${{ steps.pass.outputs.should-fail }}
+          END_TO_END: ${{ steps.pass.outputs.end-to-end-percent }}
+          COMPLETION: ${{ steps.pass.outputs.completion-reliability-percent }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DECISION" == "PASS" ]]
+          [[ "$SHOULD_FAIL" == "false" ]]
+          [[ "$END_TO_END" == "100.000000" ]]
+          [[ "$COMPLETION" == "100.000000" ]]
+          [[ -s artifacts/proofqa-pass.json ]]
+
+      - name: WARN decision without failing block-only enforcement
+        id: warn
+        uses: ./proofqa
+        with:
+          summary-path: tests/fixtures/proofqa/summary-warn.json
+          policy-name: core-canary
+          min-end-to-end: "95"
+          warn-margin: "3"
+          fail-on: block
+          report-path: artifacts/proofqa-warn.json
+
+      - name: Verify WARN outputs
+        env:
+          DECISION: ${{ steps.warn.outputs.decision }}
+          SHOULD_FAIL: ${{ steps.warn.outputs.should-fail }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DECISION" == "WARN" ]]
+          [[ "$SHOULD_FAIL" == "false" ]]
+          [[ -s artifacts/proofqa-warn.json ]]
+
+      - name: BLOCK decision fails the action
+        id: block
+        continue-on-error: true
+        uses: ./proofqa
+        with:
+          summary-path: tests/fixtures/proofqa/summary-block.json
+          policy-name: strict-production
+          report-path: artifacts/proofqa-block.json
+
+      - name: Verify BLOCK enforcement
+        env:
+          STEP_OUTCOME: ${{ steps.block.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$STEP_OUTCOME" == "failure" ]]
+          [[ -s artifacts/proofqa-block.json ]]
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/proofqa-block.json").read_text())
+          assert report["decision"] == "BLOCK"
+          assert report["should_fail"] is True
+          assert {
+              finding["axis"]
+              for finding in report["findings"]
+              if finding["status"] == "BLOCK"
+          } == {
+              "end_to_end",
+              "completion_reliability",
+              "provider_reliability",
+          }
+          PY
+
+      - name: Upload gate reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: proofqa-release-gate-reports-${{ github.sha }}
+          path: artifacts/proofqa-*.json
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,98 @@
+name: "ProofQA Release Gate"
+author: "Aleksei Safonov"
+description: "Evidence-first PASS, WARN, or BLOCK release gate for ProofQA scorecard v2 summaries."
+
+inputs:
+  summary-path:
+    description: "Path to a ProofQA summary.json containing scorecard_version 2."
+    required: true
+  policy-name:
+    description: "Human-readable policy name included in the gate report."
+    required: false
+    default: "default"
+  min-end-to-end:
+    description: "Minimum accepted end-to-end score percentage."
+    required: false
+    default: "90"
+  min-answer-correctness:
+    description: "Minimum accepted answer correctness percentage on completed tasks."
+    required: false
+    default: "90"
+  min-completion-reliability:
+    description: "Minimum accepted completion reliability percentage."
+    required: false
+    default: "95"
+  min-provider-reliability:
+    description: "Minimum accepted provider reliability percentage."
+    required: false
+    default: "95"
+  warn-margin:
+    description: "Percentage-point margin above each minimum that produces WARN instead of PASS."
+    required: false
+    default: "3"
+  unknown-metric-policy:
+    description: "Decision for null metrics. One of block, warn, or ignore."
+    required: false
+    default: "block"
+  fail-on:
+    description: "Workflow enforcement level. One of block, warn, or never."
+    required: false
+    default: "block"
+  report-path:
+    description: "Destination for the machine-readable ProofQA gate report."
+    required: false
+    default: "proofqa-gate-report.json"
+
+outputs:
+  decision:
+    description: "ProofQA policy decision: PASS, WARN, or BLOCK."
+    value: ${{ steps.gate.outputs.decision }}
+  should-fail:
+    description: "Whether the configured fail-on policy requires a failing action step."
+    value: ${{ steps.gate.outputs.should-fail }}
+  report-path:
+    description: "Path to the generated machine-readable gate report."
+    value: ${{ steps.gate.outputs.report-path }}
+  summary-sha256:
+    description: "SHA-256 digest of the evaluated ProofQA summary."
+    value: ${{ steps.gate.outputs.summary-sha256 }}
+  end-to-end-percent:
+    description: "Evaluated end-to-end percentage or n/a."
+    value: ${{ steps.gate.outputs.end-to-end-percent }}
+  answer-correctness-percent:
+    description: "Evaluated answer correctness percentage or n/a."
+    value: ${{ steps.gate.outputs.answer-correctness-percent }}
+  completion-reliability-percent:
+    description: "Evaluated completion reliability percentage or n/a."
+    value: ${{ steps.gate.outputs.completion-reliability-percent }}
+  provider-reliability-percent:
+    description: "Evaluated provider reliability percentage or n/a."
+    value: ${{ steps.gate.outputs.provider-reliability-percent }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: "Set up pinned Python runtime"
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: "3.12"
+
+    - name: "Evaluate ProofQA release policy"
+      id: gate
+      shell: bash
+      env:
+        PROOFQA_SUMMARY_PATH: ${{ inputs.summary-path }}
+        PROOFQA_POLICY_NAME: ${{ inputs.policy-name }}
+        PROOFQA_MIN_END_TO_END: ${{ inputs.min-end-to-end }}
+        PROOFQA_MIN_ANSWER_CORRECTNESS: ${{ inputs.min-answer-correctness }}
+        PROOFQA_MIN_COMPLETION_RELIABILITY: ${{ inputs.min-completion-reliability }}
+        PROOFQA_MIN_PROVIDER_RELIABILITY: ${{ inputs.min-provider-reliability }}
+        PROOFQA_WARN_MARGIN: ${{ inputs.warn-margin }}
+        PROOFQA_UNKNOWN_METRIC_POLICY: ${{ inputs.unknown-metric-policy }}
+        PROOFQA_FAIL_ON: ${{ inputs.fail-on }}
+        PROOFQA_REPORT_PATH: ${{ inputs.report-path }}
+      run: python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate.py"
+
+branding:
+  icon: "shield"
+  color: "blue"
