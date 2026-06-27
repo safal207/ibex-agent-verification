@@ -1,0 +1,19 @@
+{
+  "deployment": {
+    "run_attempt": 2,
+    "run_id": 987654321,
+    "workflow": ".github/workflows/deploy-production.yml"
+  },
+  "destination": {
+    "environment": "production",
+    "identity": "github-environment:production"
+  },
+  "kind": "production-transition-action",
+  "release_id": "release-2026-06-27.1",
+  "repository": "safal207/ibex-agent-verification",
+  "schema_version": 1,
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "status": "COMPLETED",
+  "subject_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "transition_id": "deployment/release-2026-06-27.1"
+}
