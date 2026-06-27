@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "transition_id": "agent.plan/qa-release",
+  "time": {
+    "observed_before_ns": 100,
+    "intent_declared_ns": 120,
+    "commit_ns": null,
+    "action_started_ns": null,
+    "result_observed_ns": null,
+    "evaluated_ns": 130,
+    "deadline_ns": 500
+  },
+  "intention": {
+    "intent_id": "improve-release-confidence",
+    "statement": "Explore a safer release verification path.",
+    "action": null,
+    "expected_result": null,
+    "stopping_condition": null
+  },
+  "space": {
+    "origin": "agent.plan.draft",
+    "boundary": null,
+    "destination": null
+  },
+  "evidence": {
+    "intent_ref": "note:qa-release-intent",
+    "action_ref": null,
+    "result_ref": null,
+    "verification_ref": null
+  },
+  "verification": {
+    "result_matches_expectation": null,
+    "destination_observed": null,
+    "stopping_condition_met": null
+  }
+}

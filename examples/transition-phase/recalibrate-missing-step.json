@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "transition_id": "agent.plan/qa-release-commit",
+  "time": {
+    "observed_before_ns": 100,
+    "intent_declared_ns": 120,
+    "commit_ns": 140,
+    "action_started_ns": null,
+    "result_observed_ns": null,
+    "evaluated_ns": 160,
+    "deadline_ns": 500
+  },
+  "intention": {
+    "intent_id": "improve-release-confidence",
+    "statement": "Move the release plan into execution.",
+    "action": null,
+    "expected_result": "A release decision is supported by verified evidence.",
+    "stopping_condition": "The release decision is recorded."
+  },
+  "space": {
+    "origin": "agent.plan.draft",
+    "boundary": "approval-to-execution",
+    "destination": "agent.plan.executing"
+  },
+  "evidence": {
+    "intent_ref": "note:qa-release-intent",
+    "action_ref": null,
+    "result_ref": null,
+    "verification_ref": null
+  },
+  "verification": {
+    "result_matches_expectation": null,
+    "destination_observed": null,
+    "stopping_condition_met": null
+  }
+}
