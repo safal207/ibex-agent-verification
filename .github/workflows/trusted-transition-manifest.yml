@@ -6,10 +6,12 @@ on:
       - ".github/workflows/trusted-transition-manifest.yml"
       - "scripts/proofqa_transition_manifest*.py"
       - "scripts/trusted_transition_reference.py"
+      - "scripts/publish_trusted_transition_receipt.py"
       - "proofqa/action.yml"
       - "tests/test_proofqa_transition_manifest*.py"
       - "tests/test_trusted_transition_manifest_workflow.py"
       - "tests/test_trusted_transition_reference.py"
+      - "tests/test_publish_trusted_transition_receipt.py"
       - "tests/fixtures/proofqa/transition-manifest-bundle/**"
       - "docs/PROOFQA_GITHUB_ACTION.md"
       - "docs/TRUSTED_TRANSITION_MANIFEST_PRODUCER.md"
@@ -45,7 +47,8 @@ jobs:
           python -m unittest -v \
             tests.test_proofqa_transition_manifest_builder \
             tests.test_trusted_transition_manifest_workflow \
-            tests.test_trusted_transition_reference
+            tests.test_trusted_transition_reference \
+            tests.test_publish_trusted_transition_receipt
       - name: Rebuild and verify reference manifest
         shell: bash
         run: |
@@ -76,6 +79,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+      issues: write
       id-token: write
       attestations: write
       artifact-metadata: write
@@ -164,9 +168,35 @@ jobs:
             --expected-commit "$SOURCE_SHA" \
             --report artifacts/trusted-transition-reference/final-audit.json
       - name: Upload signed reference trust chain
+        id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: trusted-transition-reference-${{ github.event.workflow_run.head_sha }}
           path: artifacts/trusted-transition-reference
           if-no-files-found: error
           retention-days: 30
+      - name: Publish discoverable receipt ledger entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          PRODUCER_RUN_ID: ${{ github.run_id }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/publish_trusted_transition_receipt.py \
+            --audit artifacts/trusted-transition-reference/final-audit.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-commit "$SOURCE_SHA" \
+            --producer-run-id "$PRODUCER_RUN_ID" \
+            --trigger-run-id "$TRIGGER_RUN_ID" \
+            --artifact-id "$ARTIFACT_ID" \
+            --artifact-url "$ARTIFACT_URL" \
+            --artifact-digest "$ARTIFACT_DIGEST" \
+            --output /tmp/trusted-transition-receipt.md
+          gh issue comment 42 \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file /tmp/trusted-transition-receipt.md
