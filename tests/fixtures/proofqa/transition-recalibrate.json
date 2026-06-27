@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "transition_id": "release/mobile-production",
+  "status": "RECALIBRATE",
+  "phase": "RECALIBRATE",
+  "next_phase": "CALIBRATE",
+  "issues": [
+    "commit_without_concrete_step"
+  ],
+  "axes": {
+    "time": {
+      "status": "WAIT"
+    },
+    "intention": {
+      "status": "BLOCK"
+    },
+    "space": {
+      "status": "WAIT"
+    }
+  },
+  "evidence": {
+    "intent_ref": "note:mobile-production-release"
+  },
+  "claim_boundary": "Fixture represents a release transition that must recalibrate before continuation."
+}
