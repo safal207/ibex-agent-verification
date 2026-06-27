@@ -1,0 +1,22 @@
+{
+  "claim_boundary": "This evidence proves one observed deployment transition for the exact release subject and destination; it does not prove general application correctness.",
+  "deployment": {
+    "branch": "main",
+    "event": "push",
+    "run_attempt": 2,
+    "run_id": 987654321,
+    "workflow": ".github/workflows/deploy-production.yml"
+  },
+  "destination": {
+    "environment": "production",
+    "identity": "github-environment:production"
+  },
+  "kind": "production-transition-source",
+  "release": {
+    "release_id": "release-2026-06-27.1",
+    "subject_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "repository": "safal207/ibex-agent-verification",
+  "schema_version": 1,
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
