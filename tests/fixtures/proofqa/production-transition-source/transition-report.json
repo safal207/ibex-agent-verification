@@ -1,0 +1,26 @@
+{
+  "axes": {
+    "intention": {
+      "status": "PASS"
+    },
+    "space": {
+      "status": "PASS"
+    },
+    "time": {
+      "status": "PASS"
+    }
+  },
+  "claim_boundary": "This evidence proves one observed deployment transition for the exact release subject and destination; it does not prove general application correctness.",
+  "evidence": {
+    "action_ref": "manifest:evidence/action.json",
+    "intent_ref": "manifest:evidence/intent.json",
+    "result_ref": "manifest:evidence/result.json",
+    "verification_ref": "manifest:evidence/verification.json"
+  },
+  "issues": [],
+  "next_phase": "CONTINUE",
+  "phase": "REFLECT",
+  "schema_version": 1,
+  "status": "VERIFIED",
+  "transition_id": "deployment/release-2026-06-27.1"
+}
