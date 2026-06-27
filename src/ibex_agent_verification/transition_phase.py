@@ -271,18 +271,20 @@ def evaluate_transition(record: dict[str, Any]) -> dict[str, Any]:
         and evidence["verification_ref"] is not None
     )
 
-    intent_claimed = any(
+    intent_claimed = any(value is not None for value in intention.values()) or any(
         value is not None
         for value in (
-            intention["intent_id"],
-            intention["statement"],
             time["intent_declared_ns"],
             evidence["intent_ref"],
         )
     )
     commit_claimed = time["commit_ns"] is not None
-    execution_claimed = time["action_started_ns"] is not None
-    result_claimed = time["result_observed_ns"] is not None
+    execution_claimed = (
+        time["action_started_ns"] is not None or evidence["action_ref"] is not None
+    )
+    result_claimed = (
+        time["result_observed_ns"] is not None or evidence["result_ref"] is not None
+    )
     verification_claimed = evidence["verification_ref"] is not None or any(
         value is not None for value in verification.values()
     )
@@ -298,6 +300,8 @@ def evaluate_transition(record: dict[str, Any]) -> dict[str, Any]:
         issues.append("result_without_result_evidence")
     if verification_claimed and not result_observed:
         issues.append("verification_without_observed_result")
+    elif verification_claimed and not verification_complete:
+        issues.append("verification_claim_without_complete_evidence")
 
     deadline_exceeded = False
     if time["deadline_ns"] is not None:
@@ -341,6 +345,7 @@ def evaluate_transition(record: dict[str, Any]) -> dict[str, Any]:
             "execution_without_action_evidence",
             "result_without_result_evidence",
             "verification_without_observed_result",
+            "verification_claim_without_complete_evidence",
         }
         for issue in issues
     )
@@ -372,6 +377,9 @@ def evaluate_transition(record: dict[str, Any]) -> dict[str, Any]:
         space,
         ("boundary", "destination"),
     )
+    destination_claim_without_evidence = (
+        verification["destination_observed"] is not None and not verification_complete
+    )
     spatial_status = "PASS"
     spatial_message = (
         "Origin, crossed boundary, destination, and destination observation are evidenced"
@@ -379,6 +387,11 @@ def evaluate_transition(record: dict[str, Any]) -> dict[str, Any]:
     if spatial_claim_failed:
         spatial_status = "BLOCK"
         spatial_message = "A committed transition lacks a declared boundary or destination"
+    elif destination_claim_without_evidence:
+        spatial_status = "BLOCK"
+        spatial_message = (
+            "Destination observation was claimed without complete verification evidence"
+        )
     elif verification["destination_observed"] is False:
         spatial_status = "BLOCK"
         spatial_message = "The declared destination was not observed"
