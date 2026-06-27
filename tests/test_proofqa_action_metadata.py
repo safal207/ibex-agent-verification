@@ -29,7 +29,7 @@ class ProofQAActionMetadataTests(unittest.TestCase):
                 self.assertTrue(line.startswith('description: "'))
                 self.assertTrue(line.endswith('"'))
 
-    def test_action_exposes_four_axis_thresholds_and_enforcement(self):
+    def test_action_exposes_quality_reliability_and_time_thresholds(self):
         for input_name in (
             "summary-path:",
             "min-end-to-end:",
@@ -37,6 +37,8 @@ class ProofQAActionMetadataTests(unittest.TestCase):
             "min-completion-reliability:",
             "min-provider-reliability:",
             "warn-margin:",
+            "max-p95-duration-ms:",
+            "time-warn-margin-ms:",
             "unknown-metric-policy:",
             "fail-on:",
             "report-path:",
@@ -53,33 +55,40 @@ class ProofQAActionMetadataTests(unittest.TestCase):
             "answer-correctness-percent:",
             "completion-reliability-percent:",
             "provider-reliability-percent:",
+            "p95-duration-ms:",
         ):
             with self.subTest(output_name=output_name):
                 self.assertIn(f"  {output_name}", ACTION)
 
-    def test_composite_runtime_is_pinned_and_calls_action_path_script(self):
+    def test_composite_runtime_is_pinned_and_calls_v3_gate(self):
         self.assertIn(
             "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
             ACTION,
         )
         self.assertNotIn("actions/setup-python@v", ACTION)
         self.assertIn(
-            'python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate.py"',
+            'python "$GITHUB_ACTION_PATH/../scripts/proofqa_gate_v3.py"',
             ACTION,
         )
         self.assertIn("PROOFQA_SUMMARY_PATH: ${{ inputs.summary-path }}", ACTION)
+        self.assertIn(
+            "PROOFQA_MAX_P95_DURATION_MS: ${{ inputs.max-p95-duration-ms }}",
+            ACTION,
+        )
         self.assertIn("PROOFQA_FAIL_ON: ${{ inputs.fail-on }}", ACTION)
 
-    def test_smoke_workflow_is_read_only_and_exercises_all_decisions(self):
+    def test_smoke_workflow_is_read_only_and_exercises_time_decisions(self):
         permissions = WORKFLOW.split("\njobs:", 1)[0]
         self.assertIn("  contents: read", permissions)
         self.assertNotIn("contents: write", permissions)
         self.assertNotIn("id-token: write", permissions)
-        self.assertEqual(WORKFLOW.count("uses: ./proofqa"), 3)
-        self.assertIn("- name: PASS decision", WORKFLOW)
-        self.assertIn("- name: WARN decision", WORKFLOW)
-        self.assertIn("- name: BLOCK decision fails the action", WORKFLOW)
+        self.assertEqual(WORKFLOW.count("uses: ./proofqa"), 4)
+        self.assertIn("- name: PASS time decision", WORKFLOW)
+        self.assertIn("- name: WARN time decision", WORKFLOW)
+        self.assertIn("- name: BLOCK time decision fails the action", WORKFLOW)
+        self.assertIn("Preserve v2 compatibility", WORKFLOW)
         self.assertIn("continue-on-error: true", WORKFLOW)
+        self.assertIn('[[ "$P95_MS" == "700.000000" ]]', WORKFLOW)
         self.assertIn('[[ "$STEP_OUTCOME" == "failure" ]]', WORKFLOW)
 
     def test_smoke_workflow_uses_pinned_external_actions(self):
