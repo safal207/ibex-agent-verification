@@ -161,12 +161,23 @@ runs:
         TRANSITION_REPORT_PATH: ${{ inputs.transition-report-path }}
         MANIFEST_POLICY: ${{ inputs.transition-manifest-policy }}
         RECEIPT_PATH: ${{ inputs.transition-manifest-receipt-path }}
+        REPORT_PATH: ${{ inputs.report-path }}
       run: |
         set -euo pipefail
         [[ -n "$EVIDENCE_DIR" ]]
         [[ -n "$MANIFEST_PATH" ]]
         [[ -n "$TRANSITION_REPORT_PATH" ]]
         [[ -n "$RECEIPT_PATH" ]]
+        [[ -n "$REPORT_PATH" ]]
+        evidence_root="$(realpath "$EVIDENCE_DIR")"
+        receipt_resolved="$(realpath -m "$RECEIPT_PATH")"
+        report_resolved="$(realpath -m "$REPORT_PATH")"
+        for output_path in "$receipt_resolved" "$report_resolved"; do
+          if [[ "$output_path" == "$evidence_root" || "$output_path" == "$evidence_root/"* ]]; then
+            echo "Derived ProofQA outputs must be outside transition-evidence-dir" >&2
+            exit 2
+          fi
+        done
         python "$GITHUB_ACTION_PATH/../scripts/proofqa_transition_manifest.py" verify \
           --evidence-dir "$EVIDENCE_DIR" \
           --manifest "$MANIFEST_PATH" \
