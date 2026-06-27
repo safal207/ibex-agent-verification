@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "status": "COMPLETE",
+  "suite_id": "qa-engineer-core-v0.1",
+  "title": "AI QA Engineer Core Verification Suite v0.1",
+  "provider": "cerebras",
+  "model": "zai-glm-4.7",
+  "scorecard_version": 2,
+  "score": {
+    "earned": 19,
+    "possible": 29,
+    "percent": 65.517241
+  },
+  "scorecard": {
+    "schema_version": 1,
+    "end_to_end_score": {
+      "earned": 19,
+      "possible": 29,
+      "percent": 65.517241
+    },
+    "answer_correctness": {
+      "earned": 19,
+      "possible": 19,
+      "percent": 100.0,
+      "tasks_evaluated": 3
+    },
+    "completion_reliability": {
+      "completed": 3,
+      "total": 5,
+      "percent": 60.0
+    },
+    "provider_reliability": {
+      "successful": 4,
+      "failed": 1,
+      "unknown": 0,
+      "observed": 5,
+      "total": 5,
+      "percent": 80.0,
+      "failure_classes": {
+        "http_429": 1
+      }
+    },
+    "outcomes": {
+      "pass": 3,
+      "fail": 0,
+      "invalid_response": 0,
+      "output_truncated": 1,
+      "inference_failed": 1
+    }
+  }
+}
