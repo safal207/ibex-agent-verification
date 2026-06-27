@@ -12,6 +12,7 @@ on:
       - "tests/test_trusted_transition_reference.py"
       - "tests/fixtures/proofqa/transition-manifest-bundle/**"
       - "docs/PROOFQA_GITHUB_ACTION.md"
+      - "docs/TRUSTED_TRANSITION_MANIFEST_PRODUCER.md"
       - "README.md"
   workflow_run:
     workflows: ["ProofQA Release Gate Action"]
