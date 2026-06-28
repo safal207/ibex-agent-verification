@@ -18,6 +18,7 @@ try:
         repository,
         sha256_file,
         text,
+        workflow,
         write_json,
     )
 except ImportError:
@@ -31,6 +32,7 @@ except ImportError:
         repository,
         sha256_file,
         text,
+        workflow,
         write_json,
     )
 
@@ -42,6 +44,7 @@ def audit_signed_reference(
     expected_commit: str,
     expected_run_id: int,
     expected_run_attempt: int,
+    expected_source_workflow: str,
     expected_signer_workflow: str,
 ) -> dict[str, Any]:
     root = root_dir.resolve(strict=True)
@@ -49,6 +52,9 @@ def audit_signed_reference(
     source_commit = commit(expected_commit, label="expected commit")
     run_id = positive_int(expected_run_id, label="expected run id")
     run_attempt = positive_int(expected_run_attempt, label="expected run attempt")
+    source_workflow = workflow(
+        expected_source_workflow, label="expected source workflow"
+    )
     signer = text(
         expected_signer_workflow,
         label="expected signer workflow",
@@ -85,7 +91,7 @@ def audit_signed_reference(
         not isinstance(claim_boundary, str)
         or "not a production deployment claim" not in claim_boundary
     ):
-        raise TrustedTransitionArtifactError("reference claim boundary is missing")
+        raise TrustedTransitionArtifactError("source claim boundary is missing")
     deployment = provenance.get("deployment")
     if not isinstance(deployment, dict):
         raise TrustedTransitionArtifactError("source provenance deployment is missing")
@@ -94,6 +100,8 @@ def audit_signed_reference(
         or deployment.get("run_attempt") != run_attempt
     ):
         raise TrustedTransitionArtifactError("source provenance run identity mismatch")
+    if deployment.get("workflow") != source_workflow:
+        raise TrustedTransitionArtifactError("source provenance workflow mismatch")
 
     files = manifest.get("files")
     if not isinstance(files, list):
@@ -120,6 +128,8 @@ def audit_signed_reference(
         or selection.get("run_attempt") != run_attempt
     ):
         raise TrustedTransitionArtifactError("artifact selection run identity mismatch")
+    if selection.get("workflow") != source_workflow:
+        raise TrustedTransitionArtifactError("artifact selection workflow mismatch")
     source_artifact = selection.get("artifact")
     if not isinstance(source_artifact, dict):
         raise TrustedTransitionArtifactError(
@@ -147,6 +157,14 @@ def audit_signed_reference(
         or validation.get("source_commit") != source_commit
     ):
         raise TrustedTransitionArtifactError("source validation identity mismatch")
+    validation_deployment = validation.get("deployment")
+    if (
+        not isinstance(validation_deployment, dict)
+        or validation_deployment.get("workflow") != source_workflow
+        or validation_deployment.get("run_id") != run_id
+        or validation_deployment.get("run_attempt") != run_attempt
+    ):
+        raise TrustedTransitionArtifactError("source validation workflow identity mismatch")
     if validation.get("files_checked") != len(EXPECTED_SOURCE_FILES):
         raise TrustedTransitionArtifactError("source validation file count mismatch")
     if validation.get("claim_boundary") != claim_boundary:
@@ -196,6 +214,7 @@ def audit_signed_reference(
         "status": "VERIFIED",
         "repository": repo,
         "source_commit": source_commit,
+        "source_workflow": source_workflow,
         "manifest_sha256": manifest_sha,
         "receipt_sha256": sha256_file(receipt_path),
         "gate_report_sha256": sha256_file(report_path),
@@ -217,13 +236,14 @@ def audit_signed_reference(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Audit one signed cross-workflow reference trust chain"
+        description="Audit one signed cross-workflow transition trust chain"
     )
     parser.add_argument("--root-dir", type=Path, required=True)
     parser.add_argument("--expected-repository", required=True)
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--expected-run-id", type=int, required=True)
     parser.add_argument("--expected-run-attempt", type=int, required=True)
+    parser.add_argument("--expected-source-workflow", required=True)
     parser.add_argument("--expected-signer-workflow", required=True)
     parser.add_argument("--report", type=Path, required=True)
     return parser
@@ -238,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_commit=args.expected_commit,
             expected_run_id=args.expected_run_id,
             expected_run_attempt=args.expected_run_attempt,
+            expected_source_workflow=args.expected_source_workflow,
             expected_signer_workflow=args.expected_signer_workflow,
         )
         write_json(

@@ -5,7 +5,7 @@ import argparse
 import json
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -16,9 +16,9 @@ class IngestionReceiptError(ValueError):
 _SHA256_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _ARTIFACT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
+_WORKFLOW_RE = re.compile(r"^\.github/workflows/[A-Za-z0-9._/-]+\.ya?ml$")
 _RECEIPT_MARKER = "<!-- trusted-transition-artifact-ingestion-receipt -->"
 _PRODUCER_WORKFLOW = ".github/workflows/trusted-transition-artifact.yml"
-_SOURCE_WORKFLOW = ".github/workflows/proofqa-transition-source.yml"
 
 
 def _load_object(path: Path, *, label: str) -> dict[str, Any]:
@@ -64,6 +64,19 @@ def _artifact_name(value: Any, *, label: str) -> str:
     return value
 
 
+def _workflow(value: Any, *, label: str) -> str:
+    if not isinstance(value, str) or not _WORKFLOW_RE.fullmatch(value):
+        raise IngestionReceiptError(f"{label} must be a canonical workflow path")
+    path = PurePosixPath(value)
+    if (
+        path.as_posix() != value
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or path.parts[:2] != (".github", "workflows")
+    ):
+        raise IngestionReceiptError(f"{label} must be a canonical workflow path")
+    return value
+
+
 def render_receipt(
     *,
     audit: dict[str, Any],
@@ -87,6 +100,9 @@ def render_receipt(
         )
     if audit.get("source_commit") != source_commit:
         raise IngestionReceiptError("final audit source commit mismatch")
+    source_workflow = _workflow(
+        audit.get("source_workflow"), label="audited source workflow"
+    )
 
     source_artifact = audit.get("source_artifact")
     if not isinstance(source_artifact, dict):
@@ -164,7 +180,7 @@ def render_receipt(
         "source_commit": source_commit,
         "source_run_attempt": source_run_attempt,
         "source_run_id": supplied_source_run_id,
-        "source_workflow": _SOURCE_WORKFLOW,
+        "source_workflow": source_workflow,
         "type": "trusted-transition-artifact-ingestion-receipt",
     }
     rendered = json.dumps(payload, indent=2, sort_keys=True)

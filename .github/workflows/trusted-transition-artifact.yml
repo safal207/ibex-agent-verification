@@ -3,8 +3,10 @@ name: Trusted Transition Artifact Ingestion
 on:
   pull_request:
     paths:
+      - ".github/workflows/ibex-evidence-promotion.yml"
       - ".github/workflows/proofqa-transition-source.yml"
       - ".github/workflows/trusted-transition-artifact.yml"
+      - "scripts/ibex_evidence_promotion.py"
       - "scripts/trusted_transition_artifact.py"
       - "scripts/trusted_transition_reference_source.py"
       - "scripts/trusted_transition_artifact_audit.py"
@@ -12,11 +14,13 @@ on:
       - "scripts/production_transition_source.py"
       - "scripts/proofqa_transition_manifest*.py"
       - "proofqa/action.yml"
+      - "tests/test_ibex_evidence_promotion.py"
       - "tests/test_trusted_transition_artifact*.py"
       - "tests/test_publish_trusted_artifact_ingestion_receipt.py"
+      - "tests/fixtures/proofqa/trusted-artifact-ingestion-contract.json"
       - "docs/TRUSTED_TRANSITION_ARTIFACT_INGESTION.md"
   workflow_run:
-    workflows: ["ProofQA Transition Source Artifact"]
+    workflows: ["Ibex Evidence Promotion"]
     types: [completed]
 
 permissions:
@@ -43,9 +47,11 @@ jobs:
       - run: python -m pip install -e .
       - run: |
           python -m unittest -v \
+            tests.test_ibex_evidence_promotion \
             tests.test_production_transition_source \
             tests.test_proofqa_transition_manifest_builder \
             tests.test_trusted_transition_artifact \
+            tests.test_trusted_transition_artifact_audit \
             tests.test_trusted_transition_artifact_workflow \
             tests.test_publish_trusted_artifact_ingestion_receipt
 
@@ -65,6 +71,9 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
+    env:
+      SOURCE_WORKFLOW: .github/workflows/ibex-evidence-promotion.yml
+      DESTINATION_ENVIRONMENT: ibex-evidence-release
     steps:
       - name: Check out exact source commit
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -83,7 +92,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git diff --exit-code
-      - name: Select exact source artifact
+      - name: Select exact promoted source artifact
         id: source-artifact
         env:
           GH_TOKEN: ${{ github.token }}
@@ -108,7 +117,7 @@ jobs:
             --expected-head-repository-id "$HEAD_REPOSITORY_ID" \
             --expected-run-id "$TRIGGER_RUN_ID" \
             --expected-run-attempt "$TRIGGER_RUN_ATTEMPT" \
-            --expected-workflow .github/workflows/proofqa-transition-source.yml \
+            --expected-workflow "$SOURCE_WORKFLOW" \
             --expected-head-branch main \
             --expected-head-sha "$SOURCE_SHA" \
             --expected-name "$ARTIFACT_NAME" \
@@ -124,13 +133,15 @@ jobs:
           path: ${{ runner.temp }}/trusted-transition-source-download
           skip-decompress: true
           digest-mismatch: error
-      - name: Extract and validate exact source bytes
+      - name: Extract and validate exact promoted source bytes
         env:
           SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
           TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
           TRIGGER_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPOSITORY_ID: ${{ github.repository_id }}
         run: |
           set -euo pipefail
+          DESTINATION_ID="github-actions:repository-id:${REPOSITORY_ID}:environment:${DESTINATION_ENVIRONMENT}"
           python scripts/trusted_transition_artifact.py extract \
             --download-dir "$RUNNER_TEMP/trusted-transition-source-download" \
             --selection artifacts/trusted-transition-ingested/source-artifact-selection.json \
@@ -140,13 +151,13 @@ jobs:
             --source-dir artifacts/trusted-transition-ingested/bundle \
             --expected-repository "$GITHUB_REPOSITORY" \
             --expected-commit "$SOURCE_SHA" \
-            --expected-workflow .github/workflows/proofqa-transition-source.yml \
+            --expected-workflow "$SOURCE_WORKFLOW" \
             --expected-run-id "$TRIGGER_RUN_ID" \
             --expected-run-attempt "$TRIGGER_RUN_ATTEMPT" \
             --expected-event workflow_run \
             --expected-branch main \
-            --expected-environment reference \
-            --expected-destination-id proofqa:trusted-artifact-ingestion \
+            --expected-environment "$DESTINATION_ENVIRONMENT" \
+            --expected-destination-id "$DESTINATION_ID" \
             --report artifacts/trusted-transition-ingested/source-validation.json
       - name: Build exact final manifest
         run: |
@@ -172,7 +183,7 @@ jobs:
           set -euo pipefail
           test -s "$SOURCE_BUNDLE"
           cp "$SOURCE_BUNDLE" artifacts/trusted-transition-ingested/manifest.sigstore.json
-      - name: Require attested source through ProofQA
+      - name: Require attested promoted source through ProofQA
         uses: ./proofqa
         with:
           summary-path: tests/fixtures/proofqa/summary-time-pass.json
@@ -185,7 +196,7 @@ jobs:
           transition-attestation-bundle-path: artifacts/trusted-transition-ingested/manifest.sigstore.json
           transition-attestation-repository: ${{ github.repository }}
           transition-attestation-signer-workflow: ${{ github.repository }}/.github/workflows/trusted-transition-artifact.yml
-          policy-name: trusted-artifact-ingestion-reference
+          policy-name: ibex-evidence-promotion
           max-p95-duration-ms: "1000"
           fail-on: block
           report-path: artifacts/trusted-transition-ingested/proofqa-gate-report.json
@@ -201,6 +212,7 @@ jobs:
             --expected-commit "$SOURCE_SHA" \
             --expected-run-id "$TRIGGER_RUN_ID" \
             --expected-run-attempt "$TRIGGER_RUN_ATTEMPT" \
+            --expected-source-workflow "$SOURCE_WORKFLOW" \
             --expected-signer-workflow "$GITHUB_REPOSITORY/.github/workflows/trusted-transition-artifact.yml" \
             --report artifacts/trusted-transition-ingested/final-audit.json
       - name: Upload signed ingested trust chain

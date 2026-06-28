@@ -1,7 +1,8 @@
 {
   "artifact_name_template": "proofqa-transition-source-{source_commit}",
-  "claim_boundary": "Reference cross-workflow ingestion only; not a production deployment claim.",
-  "destination_identity": "proofqa:trusted-artifact-ingestion",
+  "claim_boundary": "Real Ibex evidence promotion observation; not a physical-hardware or production deployment claim.",
+  "destination_environment": "ibex-evidence-release",
+  "destination_identity_template": "github-actions:repository-id:{repository_id}:environment:ibex-evidence-release",
   "expected_source_files": [
     "evidence/action.json",
     "evidence/intent.json",
@@ -12,8 +13,12 @@
   ],
   "final_artifact_name_template": "trusted-transition-ingested-{source_commit}",
   "manifest_signer_workflow": ".github/workflows/trusted-transition-artifact.yml",
+  "promotion_workflow": ".github/workflows/ibex-evidence-promotion.yml",
   "receipt_issue": 42,
   "receipt_type": "trusted-transition-artifact-ingestion-receipt",
-  "schema_version": 2,
-  "source_workflow": ".github/workflows/proofqa-transition-source.yml"
+  "schema_version": 3,
+  "source_workflow": ".github/workflows/ibex-evidence-promotion.yml",
+  "upstream_artifact_name_template": "ibex-verilator-evidence-{source_commit}",
+  "upstream_dut_commit": "022f084096baed0a9b5ebdf697ed2965f13e8ed8",
+  "upstream_workflow": ".github/workflows/ibex-e2e.yml"
 }
