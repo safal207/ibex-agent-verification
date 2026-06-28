@@ -1,0 +1,263 @@
+name: GitHub Release Production Deployment
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/github-release-production-deployment.yml"
+      - ".github/workflows/ibex-evidence-promotion.yml"
+      - ".github/workflows/trusted-transition-artifact.yml"
+      - "scripts/github_release_production_source.py"
+      - "scripts/trusted_transition_artifact.py"
+      - "scripts/production_transition_source.py"
+      - "tests/test_github_release_production_source.py"
+      - "tests/test_trusted_transition_artifact_workflow.py"
+      - "tests/fixtures/proofqa/trusted-artifact-ingestion-contract.json"
+      - "docs/TRUSTED_TRANSITION_ARTIFACT_INGESTION.md"
+  workflow_run:
+    workflows: ["Ibex Evidence Promotion"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-release-production-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: Test GitHub Release oracle and downstream contracts
+        run: |
+          python -m unittest -v \
+            tests.test_github_release_production_source \
+            tests.test_production_transition_source \
+            tests.test_trusted_transition_artifact \
+            tests.test_trusted_transition_artifact_audit \
+            tests.test_trusted_transition_artifact_workflow \
+            tests.test_publish_trusted_artifact_ingestion_receipt
+
+  deploy:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_run' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ibex-customer-release
+    permissions:
+      contents: write
+      actions: read
+    env:
+      SOURCE_WORKFLOW: .github/workflows/ibex-evidence-promotion.yml
+      DEPLOYMENT_WORKFLOW: .github/workflows/github-release-production-deployment.yml
+    steps:
+      - name: Check out exact promoted commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: Require immutable promotion trigger identity
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Select exact promoted source artifact
+        id: source-artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          HEAD_REPOSITORY_ID: ${{ github.event.workflow_run.head_repository.id }}
+          ARTIFACT_NAME: proofqa-transition-source-${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/github-release-production-reports
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?name=$ARTIFACT_NAME&per_page=100" \
+            > artifacts/github-release-production-reports/source-artifacts-api.json
+          python scripts/trusted_transition_artifact.py select \
+            --api-json artifacts/github-release-production-reports/source-artifacts-api.json \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-repository-id "$REPOSITORY_ID" \
+            --expected-head-repository-id "$HEAD_REPOSITORY_ID" \
+            --expected-run-id "$SOURCE_RUN_ID" \
+            --expected-run-attempt "$SOURCE_RUN_ATTEMPT" \
+            --expected-workflow "$SOURCE_WORKFLOW" \
+            --expected-head-branch main \
+            --expected-head-sha "$SOURCE_SHA" \
+            --expected-name "$ARTIFACT_NAME" \
+            --report artifacts/github-release-production-reports/source-artifact-selection.json \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Download raw promoted source archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ steps.source-artifact.outputs.artifact-id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          path: ${{ runner.temp }}/promotion-source-download
+          skip-decompress: true
+          digest-mismatch: error
+      - name: Preflight exact source before publication
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+          DESTINATION_ID="github-actions:repository-id:${REPOSITORY_ID}:environment:ibex-evidence-release"
+          python scripts/trusted_transition_artifact.py extract \
+            --download-dir "$RUNNER_TEMP/promotion-source-download" \
+            --selection artifacts/github-release-production-reports/source-artifact-selection.json \
+            --output-dir "$RUNNER_TEMP/promotion-source-preflight" \
+            --report artifacts/github-release-production-reports/source-artifact-extraction.json
+          python scripts/production_transition_source.py \
+            --source-dir "$RUNNER_TEMP/promotion-source-preflight" \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-commit "$SOURCE_SHA" \
+            --expected-workflow "$SOURCE_WORKFLOW" \
+            --expected-run-id "$SOURCE_RUN_ID" \
+            --expected-run-attempt "$SOURCE_RUN_ATTEMPT" \
+            --expected-event workflow_run \
+            --expected-branch main \
+            --expected-environment ibex-evidence-release \
+            --expected-destination-id "$DESTINATION_ID" \
+            --report artifacts/github-release-production-reports/source-validation.json
+      - name: Publish immutable customer release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          TAG="ibex-evidence-${SOURCE_SHA}"
+          ASSET_NAME="proofqa-transition-source-${SOURCE_SHA}.zip"
+          SOURCE_ARCHIVE="$(find "$RUNNER_TEMP/promotion-source-download" -maxdepth 1 -type f -print)"
+          test -n "$SOURCE_ARCHIVE"
+          test "$(find "$RUNNER_TEMP/promotion-source-download" -maxdepth 1 -type f | wc -l)" -eq 1
+          mkdir -p "$RUNNER_TEMP/release-staging"
+          cp "$SOURCE_ARCHIVE" "$RUNNER_TEMP/release-staging/$ASSET_NAME"
+
+          if gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+              > artifacts/github-release-production-reports/release-before.json 2>/dev/null; then
+            echo "Reusing exact commit-specific release $TAG after validation."
+          else
+            jq -n \
+              --arg tag "$TAG" \
+              --arg sha "$SOURCE_SHA" \
+              --arg name "Ibex verified evidence $SOURCE_SHA" \
+              --arg body "Exact transition-source archive for commit $SOURCE_SHA. Integrity and deployment evidence are published separately; this release does not claim physical hardware execution." \
+              '{tag_name:$tag,target_commitish:$sha,name:$name,body:$body,draft:false,prerelease:false,generate_release_notes:false}' \
+              > artifacts/github-release-production-reports/create-release.json
+            gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/repos/$GITHUB_REPOSITORY/releases" \
+              --input artifacts/github-release-production-reports/create-release.json \
+              > artifacts/github-release-production-reports/release-before.json
+          fi
+
+          TOTAL_ASSETS="$(jq -er '.assets | length' artifacts/github-release-production-reports/release-before.json)"
+          MATCHING_ASSETS="$(jq -er --arg name "$ASSET_NAME" '[.assets[] | select(.name == $name)] | length' artifacts/github-release-production-reports/release-before.json)"
+          if [[ "$TOTAL_ASSETS" == "0" ]]; then
+            gh release upload "$TAG" "$RUNNER_TEMP/release-staging/$ASSET_NAME" \
+              --repo "$GITHUB_REPOSITORY"
+          elif [[ "$TOTAL_ASSETS" == "1" && "$MATCHING_ASSETS" == "1" ]]; then
+            echo "Exact release asset already exists; refusing mutation and verifying bytes."
+          else
+            echo "Release contains unexpected assets; refusing mutation." >&2
+            exit 2
+          fi
+
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+            > artifacts/github-release-production-reports/release.json
+          mkdir -p "$RUNNER_TEMP/live-release-download"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$ASSET_NAME" \
+            --dir "$RUNNER_TEMP/live-release-download"
+      - name: Observe live release and build production transition source
+        id: production-source
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+          TAG="ibex-evidence-${SOURCE_SHA}"
+          python scripts/github_release_production_source.py build \
+            --source-download-dir "$RUNNER_TEMP/promotion-source-download" \
+            --source-selection artifacts/github-release-production-reports/source-artifact-selection.json \
+            --source-extracted-dir "$RUNNER_TEMP/promotion-source-build" \
+            --release-api-json artifacts/github-release-production-reports/release.json \
+            --release-download-dir "$RUNNER_TEMP/live-release-download" \
+            --output-dir artifacts/github-release-production-source \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-repository-id "$REPOSITORY_ID" \
+            --expected-commit "$SOURCE_SHA" \
+            --expected-source-workflow "$SOURCE_WORKFLOW" \
+            --expected-source-run-id "$SOURCE_RUN_ID" \
+            --expected-source-run-attempt "$SOURCE_RUN_ATTEMPT" \
+            --expected-release-tag "$TAG" \
+            --expected-deployment-workflow "$DEPLOYMENT_WORKFLOW" \
+            --deployment-run-id "$GITHUB_RUN_ID" \
+            --deployment-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --report artifacts/github-release-production-reports/production-source-build.json \
+            --github-output "$GITHUB_OUTPUT"
+          python scripts/production_transition_source.py \
+            --source-dir artifacts/github-release-production-source \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-commit "$SOURCE_SHA" \
+            --expected-workflow "$DEPLOYMENT_WORKFLOW" \
+            --expected-run-id "$GITHUB_RUN_ID" \
+            --expected-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --expected-event workflow_run \
+            --expected-branch main \
+            --expected-environment ibex-customer-release \
+            --expected-destination-id "${{ steps.production-source.outputs.destination-id }}" \
+            --report artifacts/github-release-production-reports/production-source-validation.json
+      - name: Upload exact customer deployment transition source
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: proofqa-transition-source-${{ github.event.workflow_run.head_sha }}
+          path: artifacts/github-release-production-source
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload GitHub Release deployment audit
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: github-release-production-audit-${{ github.event.workflow_run.head_sha }}
+          path: artifacts/github-release-production-reports
+          if-no-files-found: error
+          retention-days: 30
