@@ -110,6 +110,17 @@ class DeepSeekReviewTests(unittest.TestCase):
         )
         self.assertEqual(changed_paths(diff), {"logo.png"})
 
+    def test_changed_paths_ignores_patch_body_file_headers(self):
+        diff = (
+            "diff --git a/real.py b/real.py\n"
+            "--- a/real.py\n+++ b/real.py\n"
+            "@@ -1 +1 @@\n"
+            "+not a header\n"
+            "+++ b/fake.py\n"
+            "--- a/fake.py\n"
+        )
+        self.assertEqual(changed_paths(diff), {"real.py"})
+
     def test_prompt_marks_pr_material_as_untrusted(self):
         payload = json.loads(
             build_payload(
