@@ -290,3 +290,45 @@ def verify_manifest(*, evidence_dir: Path, manifest_path: Path) -> dict[str, Any
         "manifest_sha256": f"sha256:{sha256_file(manifest)}",
         "source_set_digest": f"sha256:{_source_set_digest(normalized_entries)}",
     }
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m ibex_agent_verification.evidence",
+        description="Build a deterministic Ibex E2E evidence manifest.",
+    )
+    parser.add_argument("--evidence-dir", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--project-sha", required=True)
+    parser.add_argument("--ibex-requested-ref", required=True)
+    parser.add_argument("--ibex-resolved-sha", required=True)
+    parser.add_argument("--ibex-config", required=True)
+    parser.add_argument("--timing-exit-code", required=True, type=int)
+    parser.add_argument("--tool-versions-file", required=True)
+    parser.add_argument("--commands-file", required=True)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_arg_parser().parse_args(argv)
+    try:
+        manifest = write_manifest(
+            evidence_dir=Path(args.evidence_dir),
+            output=Path(args.output),
+            project_sha=args.project_sha,
+            ibex_requested_ref=args.ibex_requested_ref,
+            ibex_resolved_sha=args.ibex_resolved_sha,
+            ibex_config=args.ibex_config,
+            timing_exit_code=args.timing_exit_code,
+            tool_versions_file=Path(args.tool_versions_file),
+            commands_file=Path(args.commands_file),
+        )
+    except EvidenceError as exc:
+        print(json.dumps({"status": "INVALID_INPUT", "error": str(exc)}, indent=2), flush=True)
+        return 2
+    print(json.dumps({"status": "MANIFEST_WRITTEN", "output": args.output, "files": len(manifest["files"])}, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
