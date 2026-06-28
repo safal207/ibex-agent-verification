@@ -74,12 +74,31 @@ def install_report(wheel: Path, **overrides):
     return report
 
 
-def cli_report(**overrides):
+def source_set_digest(manifest: dict) -> str:
+    entries = [
+        {
+            "path": item["path"],
+            "size_bytes": item["size_bytes"],
+            "sha256": item["sha256"],
+        }
+        for item in sorted(manifest["files"], key=lambda value: value["path"])
+    ]
+    return "sha256:" + hashlib.sha256(
+        json.dumps(entries, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def cli_report(prepared: dict, **overrides):
     report = {
         "status": "VERIFIED",
         "schema_version": 1,
         "files_checked": 6,
         "mismatches": [],
+        "manifest_sha256": (
+            "sha256:"
+            + hashlib.sha256(prepared["manifest_path"].read_bytes()).hexdigest()
+        ),
+        "source_set_digest": source_set_digest(prepared["manifest"]),
     }
     report.update(overrides)
     return report
@@ -121,15 +140,15 @@ def prepare(root: Path, *, wheel_entry="ibex_agent_verification.cli:main"):
         "release_download": release_download,
         "source_dir": source_dir,
         "runtime_bundle": runtime_bundle,
+        "manifest_path": manifest_path,
         "manifest": json.loads(manifest_path.read_text(encoding="utf-8")),
         "wheel": wheel,
         "extraction": extraction,
     }
 
 
-def build_runtime(root: Path, **overrides):
-    prepared = prepare(root, wheel_entry=overrides.pop("wheel_entry", "ibex_agent_verification.cli:main"))
-    arguments = {
+def arguments(root: Path, prepared: dict) -> dict:
+    return {
         "source_dir": prepared["source_dir"],
         "release": prepared["release"],
         "release_download_dir": prepared["release_download"],
@@ -137,7 +156,7 @@ def build_runtime(root: Path, **overrides):
         "runtime_manifest": prepared["manifest"],
         "wheel_path": prepared["wheel"],
         "install_report": install_report(prepared["wheel"]),
-        "cli_report": cli_report(),
+        "cli_report": cli_report(prepared),
         "output_dir": root / "runtime-source",
         "expected_repository": REPOSITORY,
         "expected_repository_id": REPOSITORY_ID,
@@ -150,9 +169,19 @@ def build_runtime(root: Path, **overrides):
         "runtime_run_id": RUNTIME_RUN_ID,
         "runtime_run_attempt": RUNTIME_RUN_ATTEMPT,
     }
-    arguments.update(overrides)
-    result = build_runtime_source(**arguments)
-    return result, arguments["output_dir"], prepared
+
+
+def build_runtime(root: Path, **overrides):
+    prepared = prepare(
+        root,
+        wheel_entry=overrides.pop(
+            "wheel_entry", "ibex_agent_verification.cli:main"
+        ),
+    )
+    values = arguments(root, prepared)
+    values.update(overrides)
+    result = build_runtime_source(**values)
+    return result, values["output_dir"], prepared
 
 
 class GitHubReleaseRuntimeSourceTests(unittest.TestCase):
@@ -161,7 +190,6 @@ class GitHubReleaseRuntimeSourceTests(unittest.TestCase):
             root = Path(directory)
             result, source, _ = build_runtime(root)
             destination_id = result["runtime_source"]["destination"]["identity"]
-
             validation = validate_production_transition_source(
                 source_dir=source,
                 expected_repository=REPOSITORY,
@@ -174,15 +202,17 @@ class GitHubReleaseRuntimeSourceTests(unittest.TestCase):
                 expected_environment="ibex-runtime-verification",
                 expected_destination_id=destination_id,
             )
-
             self.assertEqual(result["status"], "EXECUTED")
             self.assertEqual(validation["status"], "VALIDATED")
             self.assertEqual(result["runtime"]["cli"]["status"], "VERIFIED")
             self.assertEqual(result["runtime"]["manifest"]["files_checked"], 6)
-            self.assertIn("workflow-run:555555555", destination_id)
-            self.assertIn(
-                "not a physical production execution claim",
-                result["runtime_source"]["claim_boundary"],
+            self.assertEqual(
+                result["runtime"]["cli"]["manifest_sha256"],
+                result["runtime"]["manifest"]["manifest_sha256"],
+            )
+            self.assertEqual(
+                result["runtime"]["cli"]["source_set_digest"],
+                result["runtime"]["manifest"]["source_set_digest"],
             )
 
     def test_wrong_wheel_entry_point_is_rejected(self):
@@ -196,126 +226,113 @@ class GitHubReleaseRuntimeSourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             prepared = prepare(root)
-            report = install_report(
+            values = arguments(root, prepared)
+            values["install_report"] = install_report(
                 prepared["wheel"], wheel_sha256="sha256:" + "0" * 64
             )
             with self.assertRaisesRegex(
                 GitHubReleaseRuntimeError, "installed wheel digest mismatch"
             ):
-                build_runtime_source(
-                    source_dir=prepared["source_dir"],
-                    release=prepared["release"],
-                    release_download_dir=prepared["release_download"],
-                    runtime_bundle_dir=prepared["runtime_bundle"],
-                    runtime_manifest=prepared["manifest"],
-                    wheel_path=prepared["wheel"],
-                    install_report=report,
-                    cli_report=cli_report(),
-                    output_dir=root / "runtime-source",
-                    expected_repository=REPOSITORY,
-                    expected_repository_id=REPOSITORY_ID,
-                    expected_commit=COMMIT,
-                    expected_promotion_workflow=PROMOTION_WORKFLOW,
-                    expected_release_tag=TAG,
-                    expected_asset_name=ASSET_NAME,
-                    expected_package_version=PACKAGE_VERSION,
-                    runtime_workflow=RUNTIME_WORKFLOW,
-                    runtime_run_id=RUNTIME_RUN_ID,
-                    runtime_run_attempt=RUNTIME_RUN_ATTEMPT,
-                )
+                build_runtime_source(**values)
+
+    def test_measured_isolation_false_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepared = prepare(root)
+            values = arguments(root, prepared)
+            values["install_report"] = install_report(
+                prepared["wheel"], isolated=False
+            )
+            with self.assertRaisesRegex(
+                GitHubReleaseRuntimeError, "not executed with -I"
+            ):
+                build_runtime_source(**values)
 
     def test_non_virtual_environment_install_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             prepared = prepare(root)
-            report = install_report(
-                prepared["wheel"],
-                sys_base_prefix="/tmp/runtime-venv",
+            values = arguments(root, prepared)
+            values["install_report"] = install_report(
+                prepared["wheel"], sys_base_prefix="/tmp/runtime-venv"
             )
             with self.assertRaisesRegex(
-                GitHubReleaseRuntimeError, "not executed inside a virtual environment"
+                GitHubReleaseRuntimeError,
+                "not executed inside a virtual environment",
             ):
-                build_runtime_source(
-                    source_dir=prepared["source_dir"],
-                    release=prepared["release"],
-                    release_download_dir=prepared["release_download"],
-                    runtime_bundle_dir=prepared["runtime_bundle"],
-                    runtime_manifest=prepared["manifest"],
-                    wheel_path=prepared["wheel"],
-                    install_report=report,
-                    cli_report=cli_report(),
-                    output_dir=root / "runtime-source",
-                    expected_repository=REPOSITORY,
-                    expected_repository_id=REPOSITORY_ID,
-                    expected_commit=COMMIT,
-                    expected_promotion_workflow=PROMOTION_WORKFLOW,
-                    expected_release_tag=TAG,
-                    expected_asset_name=ASSET_NAME,
-                    expected_package_version=PACKAGE_VERSION,
-                    runtime_workflow=RUNTIME_WORKFLOW,
-                    runtime_run_id=RUNTIME_RUN_ID,
-                    runtime_run_attempt=RUNTIME_RUN_ATTEMPT,
-                )
+                build_runtime_source(**values)
 
     def test_cli_integrity_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             prepared = prepare(root)
+            values = arguments(root, prepared)
+            values["cli_report"] = cli_report(
+                prepared,
+                mismatches=[{"path": "evidence/action.json", "problem": "SHA256_MISMATCH"}],
+            )
             with self.assertRaisesRegex(
-                GitHubReleaseRuntimeError, "must be schema v1 VERIFIED"
+                GitHubReleaseRuntimeError, "reported integrity mismatches"
             ):
-                build_runtime_source(
-                    source_dir=prepared["source_dir"],
-                    release=prepared["release"],
-                    release_download_dir=prepared["release_download"],
-                    runtime_bundle_dir=prepared["runtime_bundle"],
-                    runtime_manifest=prepared["manifest"],
-                    wheel_path=prepared["wheel"],
-                    install_report=install_report(prepared["wheel"]),
-                    cli_report=cli_report(status="INTEGRITY_MISMATCH"),
-                    output_dir=root / "runtime-source",
-                    expected_repository=REPOSITORY,
-                    expected_repository_id=REPOSITORY_ID,
-                    expected_commit=COMMIT,
-                    expected_promotion_workflow=PROMOTION_WORKFLOW,
-                    expected_release_tag=TAG,
-                    expected_asset_name=ASSET_NAME,
-                    expected_package_version=PACKAGE_VERSION,
-                    runtime_workflow=RUNTIME_WORKFLOW,
-                    runtime_run_id=RUNTIME_RUN_ID,
-                    runtime_run_attempt=RUNTIME_RUN_ATTEMPT,
-                )
+                build_runtime_source(**values)
+
+    def test_cli_manifest_digest_mismatch_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepared = prepare(root)
+            values = arguments(root, prepared)
+            values["cli_report"] = cli_report(
+                prepared, manifest_sha256="sha256:" + "0" * 64
+            )
+            with self.assertRaisesRegex(
+                GitHubReleaseRuntimeError, "CLI manifest digest mismatch"
+            ):
+                build_runtime_source(**values)
+
+    def test_runtime_bundle_tamper_is_rejected_even_with_self_consistent_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepared = prepare(root)
+            changed = prepared["runtime_bundle"] / "evidence/action.json"
+            changed.write_text('{"tampered":true}\n', encoding="utf-8")
+            build_transition_manifest(
+                evidence_dir=prepared["runtime_bundle"],
+                output=prepared["manifest_path"],
+            )
+            prepared["manifest"] = json.loads(
+                prepared["manifest_path"].read_text(encoding="utf-8")
+            )
+            values = arguments(root, prepared)
+            with self.assertRaisesRegex(
+                GitHubReleaseRuntimeError, "live release source"
+            ):
+                build_runtime_source(**values)
 
     def test_unlisted_runtime_file_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             prepared = prepare(root)
-            (prepared["runtime_bundle"] / "extra.txt").write_text("extra", encoding="utf-8")
+            (prepared["runtime_bundle"] / "extra.txt").write_text(
+                "extra", encoding="utf-8"
+            )
+            values = arguments(root, prepared)
             with self.assertRaisesRegex(
                 GitHubReleaseRuntimeError,
                 "missing or additional non-manifest files",
             ):
-                build_runtime_source(
-                    source_dir=prepared["source_dir"],
-                    release=prepared["release"],
-                    release_download_dir=prepared["release_download"],
-                    runtime_bundle_dir=prepared["runtime_bundle"],
-                    runtime_manifest=prepared["manifest"],
-                    wheel_path=prepared["wheel"],
-                    install_report=install_report(prepared["wheel"]),
-                    cli_report=cli_report(),
-                    output_dir=root / "runtime-source",
-                    expected_repository=REPOSITORY,
-                    expected_repository_id=REPOSITORY_ID,
-                    expected_commit=COMMIT,
-                    expected_promotion_workflow=PROMOTION_WORKFLOW,
-                    expected_release_tag=TAG,
-                    expected_asset_name=ASSET_NAME,
-                    expected_package_version=PACKAGE_VERSION,
-                    runtime_workflow=RUNTIME_WORKFLOW,
-                    runtime_run_id=RUNTIME_RUN_ID,
-                    runtime_run_attempt=RUNTIME_RUN_ATTEMPT,
-                )
+                build_runtime_source(**values)
+
+    def test_absolute_manifest_path_is_rejected_before_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepared = prepare(root)
+            prepared["manifest"]["files"][0]["path"] = "/etc/passwd"
+            values = arguments(root, prepared)
+            values["runtime_manifest"] = prepared["manifest"]
+            with self.assertRaisesRegex(
+                GitHubReleaseRuntimeError, "canonical relative path"
+            ):
+                build_runtime_source(**values)
 
     def test_signer_observation_binds_runtime_identity_and_release_digest(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -324,7 +341,6 @@ class GitHubReleaseRuntimeSourceTests(unittest.TestCase):
             provenance = json.loads(
                 (source / "source-provenance.json").read_text(encoding="utf-8")
             )
-
             observation = observe_runtime_source(
                 provenance=provenance,
                 release=prepared["release"],
@@ -337,12 +353,35 @@ class GitHubReleaseRuntimeSourceTests(unittest.TestCase):
                 expected_release_tag=TAG,
                 expected_asset_name=ASSET_NAME,
             )
-
             self.assertEqual(observation["status"], "OBSERVED")
             self.assertEqual(
                 observation["destination_id"],
                 result["runtime_source"]["destination"]["identity"],
             )
+
+    def test_signer_observation_rejects_claim_boundary_variant(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, source, prepared = build_runtime(root)
+            provenance = json.loads(
+                (source / "source-provenance.json").read_text(encoding="utf-8")
+            )
+            provenance["claim_boundary"] += " Extra wording."
+            with self.assertRaisesRegex(
+                GitHubReleaseRuntimeError, "claim boundary mismatch"
+            ):
+                observe_runtime_source(
+                    provenance=provenance,
+                    release=prepared["release"],
+                    expected_repository=REPOSITORY,
+                    expected_repository_id=REPOSITORY_ID,
+                    expected_commit=COMMIT,
+                    expected_runtime_workflow=RUNTIME_WORKFLOW,
+                    expected_runtime_run_id=RUNTIME_RUN_ID,
+                    expected_runtime_run_attempt=RUNTIME_RUN_ATTEMPT,
+                    expected_release_tag=TAG,
+                    expected_asset_name=ASSET_NAME,
+                )
 
     def test_signer_observation_rejects_foreign_runtime_run(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -351,9 +390,9 @@ class GitHubReleaseRuntimeSourceTests(unittest.TestCase):
             provenance = json.loads(
                 (source / "source-provenance.json").read_text(encoding="utf-8")
             )
-
             with self.assertRaisesRegex(
-                GitHubReleaseRuntimeError, "runtime deployment run_id mismatch"
+                GitHubReleaseRuntimeError,
+                "runtime deployment run_id mismatch",
             ):
                 observe_runtime_source(
                     provenance=provenance,
