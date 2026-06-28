@@ -17,6 +17,11 @@ CLAIM = (
     "This signed reference bundle verifies trusted cross-workflow artifact ingestion "
     "and manifest signing. It is not a production deployment claim."
 )
+RUNTIME_CLAIM = (
+    "This verifies publication and live re-download of a customer release asset. "
+    "It does not prove installation or runtime behavior, and it is not a physical "
+    "production execution claim."
+)
 FILES = [
     "evidence/action.json",
     "evidence/intent.json",
@@ -36,7 +41,7 @@ def write(path: Path, payload):
     )
 
 
-def build_chain(root: Path):
+def build_chain(root: Path, *, claim=CLAIM):
     bundle = root / "bundle"
     write(
         bundle / "source-provenance.json",
@@ -50,7 +55,7 @@ def build_chain(root: Path):
                 "run_id": RUN_ID,
                 "run_attempt": RUN_ATTEMPT,
             },
-            "claim_boundary": CLAIM,
+            "claim_boundary": claim,
         },
     )
     for relative in FILES:
@@ -105,7 +110,7 @@ def build_chain(root: Path):
                 "run_attempt": RUN_ATTEMPT,
             },
             "files_checked": 6,
-            "claim_boundary": CLAIM,
+            "claim_boundary": claim,
         },
     )
     write(
@@ -131,27 +136,50 @@ def build_chain(root: Path):
     )
 
 
+def audit(root: Path):
+    return audit_signed_reference(
+        root_dir=root,
+        expected_repository=REPOSITORY,
+        expected_commit=COMMIT,
+        expected_run_id=RUN_ID,
+        expected_run_attempt=RUN_ATTEMPT,
+        expected_source_workflow=SOURCE_WORKFLOW,
+        expected_signer_workflow=SIGNER,
+    )
+
+
 class TrustedTransitionArtifactAuditTests(unittest.TestCase):
     def test_complete_chain_is_verified(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_chain(root)
-
-            result = audit_signed_reference(
-                root_dir=root,
-                expected_repository=REPOSITORY,
-                expected_commit=COMMIT,
-                expected_run_id=RUN_ID,
-                expected_run_attempt=RUN_ATTEMPT,
-                expected_source_workflow=SOURCE_WORKFLOW,
-                expected_signer_workflow=SIGNER,
-            )
+            result = audit(root)
 
             self.assertEqual(result["status"], "VERIFIED")
             self.assertEqual(result["files_checked"], 6)
             self.assertEqual(result["source_workflow"], SOURCE_WORKFLOW)
             self.assertEqual(result["source_artifact"]["run_id"], RUN_ID)
             self.assertRegex(result["manifest_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_runtime_limited_production_claim_is_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_chain(root, claim=RUNTIME_CLAIM)
+            result = audit(root)
+
+            self.assertEqual(result["status"], "VERIFIED")
+            self.assertEqual(result["claim_boundary"], RUNTIME_CLAIM)
+
+    def test_vague_production_claim_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_chain(root, claim="This release is production ready.")
+
+            with self.assertRaisesRegex(
+                TrustedTransitionArtifactError,
+                "explicit production limitation",
+            ):
+                audit(root)
 
     def test_foreign_signer_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
