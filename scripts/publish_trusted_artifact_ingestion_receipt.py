@@ -19,6 +19,10 @@ _ARTIFACT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 _WORKFLOW_RE = re.compile(r"^\.github/workflows/[A-Za-z0-9._/-]+\.ya?ml$")
 _RECEIPT_MARKER = "<!-- trusted-transition-artifact-ingestion-receipt -->"
 _PRODUCER_WORKFLOW = ".github/workflows/trusted-transition-artifact.yml"
+_CLAIM_LIMITATION_MARKERS = (
+    "not a production deployment claim",
+    "not a physical production execution claim",
+)
 
 
 def _load_object(path: Path, *, label: str) -> dict[str, Any]:
@@ -75,6 +79,19 @@ def _workflow(value: Any, *, label: str) -> str:
     ):
         raise IngestionReceiptError(f"{label} must be a canonical workflow path")
     return value
+
+
+def _claim_boundary(value: Any) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > 1000
+        or not any(marker in value for marker in _CLAIM_LIMITATION_MARKERS)
+    ):
+        raise IngestionReceiptError(
+            "final audit claim boundary lacks an explicit production limitation"
+        )
+    return value.strip()
 
 
 def render_receipt(
@@ -138,14 +155,7 @@ def render_receipt(
     if final_artifact_url != expected_url:
         raise IngestionReceiptError("final artifact URL identity mismatch")
 
-    claim_boundary = audit.get("claim_boundary")
-    if (
-        not isinstance(claim_boundary, str)
-        or not claim_boundary.strip()
-        or len(claim_boundary) > 1000
-        or "not a production deployment claim" not in claim_boundary
-    ):
-        raise IngestionReceiptError("final audit claim boundary is missing or too broad")
+    claim_boundary = _claim_boundary(audit.get("claim_boundary"))
 
     payload = {
         "attestation_status": "VERIFIED",

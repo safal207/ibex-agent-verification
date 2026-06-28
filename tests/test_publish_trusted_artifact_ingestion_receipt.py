@@ -21,6 +21,11 @@ CLAIM = (
     "This signed reference bundle verifies trusted cross-workflow artifact ingestion "
     "and manifest signing. It is not a production deployment claim."
 )
+RUNTIME_CLAIM = (
+    "This verifies publication and live re-download of a customer release asset. "
+    "It does not prove installation or runtime behavior, and it is not a physical "
+    "production execution claim."
+)
 
 
 def audit():
@@ -82,6 +87,14 @@ class TrustedArtifactIngestionReceiptTests(unittest.TestCase):
         self.assertEqual(payload["attestation_status"], "VERIFIED")
         self.assertEqual(payload["gate_decision"], "PASS")
 
+    def test_runtime_limited_claim_is_published(self):
+        payload = audit()
+        payload["claim_boundary"] = RUNTIME_CLAIM
+        body = render(payload)
+        receipt = json.loads(body.split("```json\n", 1)[1].split("\n```", 1)[0])
+
+        self.assertEqual(receipt["claim_boundary"], RUNTIME_CLAIM)
+
     def test_source_run_mismatch_is_rejected(self):
         with self.assertRaisesRegex(
             IngestionReceiptError,
@@ -127,7 +140,7 @@ class TrustedArtifactIngestionReceiptTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             IngestionReceiptError,
-            "claim boundary",
+            "explicit production limitation",
         ):
             render(payload)
 
