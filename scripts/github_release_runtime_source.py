@@ -6,6 +6,7 @@ import configparser
 import hashlib
 import json
 import re
+import stat
 import sys
 import zipfile
 from email.parser import Parser
@@ -61,6 +62,7 @@ class GitHubReleaseRuntimeError(ValueError):
 
 
 _VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}(?:[A-Za-z0-9.+-]*)?$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _PACKAGE_NAME = "ibex-agent-verification"
 _ENTRY_POINT = "ibex-av = ibex_agent_verification.cli:main"
 _RUNTIME_ENVIRONMENT = "ibex-runtime-verification"
@@ -92,11 +94,27 @@ def _exact_keys(value: dict[str, Any], expected: set[str], *, label: str) -> Non
         )
 
 
+def _commit(value: Any, *, label: str) -> str:
+    normalized = text(value, label=label, maximum=40)
+    if re.fullmatch(r"[0-9a-f]{40}", normalized) is None:
+        raise GitHubReleaseRuntimeError(f"{label} must be 40 lowercase hex")
+    return normalized
+
+
 def _version(value: Any, *, label: str) -> str:
     normalized = text(value, label=label, maximum=100)
     if _VERSION_RE.fullmatch(normalized) is None:
         raise GitHubReleaseRuntimeError(f"{label} is not a canonical package version")
     return normalized
+
+
+def _digest(value: Any, *, label: str) -> str:
+    if not isinstance(value, str):
+        raise GitHubReleaseRuntimeError(f"{label} must be a SHA-256 digest")
+    normalized = value.removeprefix("sha256:")
+    if _SHA256_RE.fullmatch(normalized) is None:
+        raise GitHubReleaseRuntimeError(f"{label} must be a SHA-256 digest")
+    return f"sha256:{normalized}"
 
 
 def _single_file(directory: Path, *, label: str) -> Path:
@@ -131,12 +149,89 @@ def _promotion_identity(repository_id: int) -> str:
     )
 
 
+def _canonical_inventory_digest(entries: list[dict[str, Any]]) -> str:
+    canonical = [
+        {
+            "path": item["path"],
+            "size_bytes": item["size_bytes"],
+            "sha256": item["sha256"],
+        }
+        for item in sorted(entries, key=lambda value: value["path"])
+    ]
+    return "sha256:" + hashlib.sha256(
+        json.dumps(canonical, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _canonical_relative(value: Any, *, label: str) -> PurePosixPath:
+    path = text(value, label=label, maximum=1000)
+    pure = PurePosixPath(path)
+    if (
+        pure.is_absolute()
+        or pure.as_posix() != path
+        or "\\" in path
+        or any(part in {"", ".", ".."} for part in pure.parts)
+    ):
+        raise GitHubReleaseRuntimeError(f"{label} is not a canonical relative path")
+    return pure
+
+
+def _safe_regular_file(root: Path, relative: PurePosixPath, *, label: str) -> Path:
+    candidate = root.joinpath(*relative.parts)
+    probe = candidate
+    while probe != root:
+        if probe.is_symlink():
+            raise GitHubReleaseRuntimeError(f"{label} traverses a symlink")
+        probe = probe.parent
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as error:
+        raise GitHubReleaseRuntimeError(f"{label} does not exist") from error
+    if not resolved.is_relative_to(root):
+        raise GitHubReleaseRuntimeError(f"{label} escapes its root")
+    if candidate.is_symlink() or not candidate.is_file():
+        raise GitHubReleaseRuntimeError(f"{label} is not a regular file")
+    return candidate
+
+
+def _source_inventory(root_path: Path, *, exclude_manifest: bool = False) -> list[dict[str, Any]]:
+    if root_path.is_symlink():
+        raise GitHubReleaseRuntimeError("source root must not be a symlink")
+    root = root_path.resolve(strict=True)
+    if not root.is_dir():
+        raise GitHubReleaseRuntimeError("source root must be a directory")
+    entries: list[dict[str, Any]] = []
+    for candidate in sorted(root.rglob("*")):
+        if candidate.is_symlink():
+            raise GitHubReleaseRuntimeError(
+                f"source contains a symlink: {candidate.relative_to(root).as_posix()}"
+            )
+        if candidate.is_dir():
+            continue
+        if not candidate.is_file():
+            raise GitHubReleaseRuntimeError(
+                f"source contains a non-regular path: {candidate.relative_to(root).as_posix()}"
+            )
+        relative = candidate.relative_to(root).as_posix()
+        if exclude_manifest and relative == "manifest.json":
+            continue
+        entries.append(
+            {
+                "path": relative,
+                "size_bytes": candidate.stat().st_size,
+                "sha256": sha256_file(candidate),
+            }
+        )
+    return entries
+
+
 def inspect_wheel(
     wheel_path: Path,
     *,
     expected_package_name: str,
     expected_version: str,
 ) -> dict[str, Any]:
+    """Validate wheel metadata and reject unsafe archive entry types."""
     if wheel_path.is_symlink() or not wheel_path.is_file():
         raise GitHubReleaseRuntimeError("wheel must be a regular non-symlink file")
     if wheel_path.suffix != ".whl":
@@ -148,16 +243,32 @@ def inspect_wheel(
     package_version = _version(expected_version, label="expected package version")
     try:
         with zipfile.ZipFile(wheel_path, "r") as archive:
-            names = archive.namelist()
-            if not names or len(names) > 500:
+            infos = archive.infolist()
+            if not infos or len(infos) > 500:
                 raise GitHubReleaseRuntimeError("wheel entry count is unsafe")
-            if any(
-                name.startswith("/")
-                or "\\" in name
-                or any(part in {"", ".", ".."} for part in PurePosixPath(name).parts)
-                for name in names
-            ):
-                raise GitHubReleaseRuntimeError("wheel contains a noncanonical path")
+            names: list[str] = []
+            folded: set[str] = set()
+            for info in infos:
+                name = info.filename
+                pure = PurePosixPath(name)
+                if (
+                    not name
+                    or name.endswith("/")
+                    or pure.is_absolute()
+                    or pure.as_posix() != name
+                    or "\\" in name
+                    or any(part in {"", ".", ".."} for part in pure.parts)
+                ):
+                    raise GitHubReleaseRuntimeError("wheel contains a noncanonical path")
+                key = name.casefold()
+                if key in folded:
+                    raise GitHubReleaseRuntimeError("wheel contains duplicate or case-colliding paths")
+                folded.add(key)
+                mode = info.external_attr >> 16
+                file_type = stat.S_IFMT(mode)
+                if file_type not in {0, stat.S_IFREG}:
+                    raise GitHubReleaseRuntimeError("wheel contains a non-regular archive entry")
+                names.append(name)
             metadata_names = [
                 name for name in names if name.endswith(".dist-info/METADATA")
             ]
@@ -176,7 +287,10 @@ def inspect_wheel(
                 metadata.get("Version"), package_version, label="wheel package version"
             )
             requires_python = metadata.get("Requires-Python")
-            if not isinstance(requires_python, str) or not requires_python.startswith(">=3.11"):
+            if (
+                not isinstance(requires_python, str)
+                or not requires_python.startswith(">=3.11")
+            ):
                 raise GitHubReleaseRuntimeError(
                     "wheel Requires-Python must preserve the >=3.11 contract"
                 )
@@ -193,7 +307,9 @@ def inspect_wheel(
                 label="wheel ibex-av entry point",
             )
             if "ibex_agent_verification/cli.py" not in names:
-                raise GitHubReleaseRuntimeError("wheel lacks ibex_agent_verification/cli.py")
+                raise GitHubReleaseRuntimeError(
+                    "wheel lacks ibex_agent_verification/cli.py"
+                )
     except (OSError, UnicodeDecodeError, zipfile.BadZipFile) as error:
         raise GitHubReleaseRuntimeError(f"unable to inspect wheel: {error}") from error
     return {
@@ -214,6 +330,7 @@ def validate_install_report(
     expected_version: str,
     expected_wheel: dict[str, Any],
 ) -> dict[str, Any]:
+    """Validate measured virtual-environment installation metadata."""
     _exact_keys(
         report,
         {
@@ -248,7 +365,7 @@ def validate_install_report(
         label="installed wheel filename",
     )
     _require_equal(
-        report.get("wheel_sha256"),
+        _digest(report.get("wheel_sha256"), label="installed wheel digest"),
         expected_wheel["sha256"],
         label="installed wheel digest",
     )
@@ -256,27 +373,40 @@ def validate_install_report(
         report.get("python_version"), label="runtime Python version", maximum=200
     )
     if not python_version.startswith(("3.11.", "3.12.", "3.13.")):
-        raise GitHubReleaseRuntimeError("runtime Python version is outside the supported set")
+        raise GitHubReleaseRuntimeError(
+            "runtime Python version is outside the supported set"
+        )
     python_executable = text(
-        report.get("python_executable"), label="runtime Python executable", maximum=1000
+        report.get("python_executable"),
+        label="runtime Python executable",
+        maximum=1000,
     )
-    sys_prefix = text(report.get("sys_prefix"), label="runtime sys.prefix", maximum=1000)
+    sys_prefix = text(
+        report.get("sys_prefix"), label="runtime sys.prefix", maximum=1000
+    )
     sys_base_prefix = text(
-        report.get("sys_base_prefix"), label="runtime sys.base_prefix", maximum=1000
+        report.get("sys_base_prefix"),
+        label="runtime sys.base_prefix",
+        maximum=1000,
     )
     if sys_prefix == sys_base_prefix:
-        raise GitHubReleaseRuntimeError("package was not executed inside a virtual environment")
+        raise GitHubReleaseRuntimeError(
+            "package was not executed inside a virtual environment"
+        )
     if not python_executable.startswith(sys_prefix.rstrip("/") + "/"):
         raise GitHubReleaseRuntimeError(
             "runtime Python executable is not inside the virtual environment"
         )
     if report.get("isolated") is not True:
-        raise GitHubReleaseRuntimeError("runtime import check was not executed with -I")
+        raise GitHubReleaseRuntimeError(
+            "runtime import check was not executed with -I"
+        )
     module_file = text(
         report.get("module_file"), label="installed module file", maximum=2000
     )
-    if not module_file.startswith(sys_prefix.rstrip("/") + "/") or not module_file.endswith(
-        "/ibex_agent_verification/__init__.py"
+    if (
+        not module_file.startswith(sys_prefix.rstrip("/") + "/")
+        or not module_file.endswith("/ibex_agent_verification/__init__.py")
     ):
         raise GitHubReleaseRuntimeError(
             "installed module did not load from the isolated virtual environment"
@@ -292,39 +422,29 @@ def validate_install_report(
     }
 
 
-def validate_cli_report(report: dict[str, Any]) -> dict[str, Any]:
-    _exact_keys(
-        report,
-        {"status", "schema_version", "files_checked", "mismatches"},
-        label="installed CLI report",
-    )
-    if report.get("schema_version") != 1 or report.get("status") != "VERIFIED":
-        raise GitHubReleaseRuntimeError(
-            "installed ibex-av report must be schema v1 VERIFIED"
-        )
-    if report.get("files_checked") != len(EXPECTED_SOURCE_FILES):
-        raise GitHubReleaseRuntimeError("installed ibex-av verified an unexpected file count")
-    if report.get("mismatches") != []:
-        raise GitHubReleaseRuntimeError("installed ibex-av reported integrity mismatches")
-    return {
-        "status": "VERIFIED",
-        "files_checked": report["files_checked"],
-        "mismatches": [],
-    }
-
-
 def validate_runtime_manifest(
     manifest: dict[str, Any],
     *,
     runtime_bundle_dir: Path,
+    source_dir: Path,
 ) -> dict[str, Any]:
+    """Bind the runtime manifest exactly to the independently extracted release source."""
     _exact_keys(manifest, {"schema_version", "files"}, label="runtime manifest")
-    if manifest.get("schema_version") != 1 or not isinstance(manifest.get("files"), list):
-        raise GitHubReleaseRuntimeError("runtime manifest must be schema v1 with files")
+    if (
+        manifest.get("schema_version") != 1
+        or not isinstance(manifest.get("files"), list)
+    ):
+        raise GitHubReleaseRuntimeError(
+            "runtime manifest must be schema v1 with files"
+        )
     files = manifest["files"]
     if len(files) != len(EXPECTED_SOURCE_FILES):
         raise GitHubReleaseRuntimeError("runtime manifest file count mismatch")
     root = runtime_bundle_dir.resolve(strict=True)
+    source_root = source_dir.resolve(strict=True)
+    manifest_path = _safe_regular_file(
+        root, PurePosixPath("manifest.json"), label="runtime manifest"
+    )
     inventory: dict[str, dict[str, Any]] = {}
     folded: set[str] = set()
     for index, item in enumerate(files):
@@ -337,10 +457,10 @@ def validate_runtime_manifest(
             {"path", "size_bytes", "sha256"},
             label=f"runtime manifest files[{index}]",
         )
-        path = text(item.get("path"), label=f"runtime manifest files[{index}].path")
-        pure = PurePosixPath(path)
-        if pure.as_posix() != path or any(part in {"", ".", ".."} for part in pure.parts):
-            raise GitHubReleaseRuntimeError(f"runtime manifest path is unsafe: {path}")
+        pure = _canonical_relative(
+            item.get("path"), label=f"runtime manifest files[{index}].path"
+        )
+        path = pure.as_posix()
         key = path.casefold()
         if path in inventory or key in folded:
             raise GitHubReleaseRuntimeError(
@@ -348,16 +468,43 @@ def validate_runtime_manifest(
             )
         folded.add(key)
         size_bytes = item.get("size_bytes")
-        if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes < 0:
-            raise GitHubReleaseRuntimeError(f"runtime manifest size is invalid: {path}")
+        if (
+            isinstance(size_bytes, bool)
+            or not isinstance(size_bytes, int)
+            or size_bytes < 0
+        ):
+            raise GitHubReleaseRuntimeError(
+                f"runtime manifest size is invalid: {path}"
+            )
         raw_sha = item.get("sha256")
-        if not isinstance(raw_sha, str) or re.fullmatch(r"[0-9a-f]{64}", raw_sha) is None:
-            raise GitHubReleaseRuntimeError(f"runtime manifest digest is invalid: {path}")
-        candidate = root.joinpath(*pure.parts)
-        if candidate.is_symlink() or not candidate.is_file():
-            raise GitHubReleaseRuntimeError(f"runtime manifest path is not regular: {path}")
-        _require_equal(candidate.stat().st_size, size_bytes, label=f"runtime file size {path}")
-        _require_equal(sha256_file(candidate), raw_sha, label=f"runtime file digest {path}")
+        if not isinstance(raw_sha, str) or _SHA256_RE.fullmatch(raw_sha) is None:
+            raise GitHubReleaseRuntimeError(
+                f"runtime manifest digest is invalid: {path}"
+            )
+        candidate = _safe_regular_file(
+            root, pure, label=f"runtime file {path}"
+        )
+        source_candidate = _safe_regular_file(
+            source_root, pure, label=f"live release source file {path}"
+        )
+        _require_equal(
+            candidate.stat().st_size,
+            size_bytes,
+            label=f"runtime file size {path}",
+        )
+        _require_equal(
+            sha256_file(candidate), raw_sha, label=f"runtime file digest {path}"
+        )
+        _require_equal(
+            source_candidate.stat().st_size,
+            size_bytes,
+            label=f"live release source size {path}",
+        )
+        _require_equal(
+            sha256_file(source_candidate),
+            raw_sha,
+            label=f"live release source digest {path}",
+        )
         inventory[path] = {
             "path": path,
             "size_bytes": size_bytes,
@@ -367,20 +514,82 @@ def validate_runtime_manifest(
         raise GitHubReleaseRuntimeError(
             "runtime manifest is not the exact six-file production source set"
         )
-    actual_files = {
-        path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file() and path.resolve() != (root / "manifest.json").resolve()
-    }
-    if actual_files != EXPECTED_SOURCE_FILES:
+    runtime_files = _source_inventory(root, exclude_manifest=True)
+    source_files = _source_inventory(source_root)
+    if {item["path"] for item in runtime_files} != EXPECTED_SOURCE_FILES:
         raise GitHubReleaseRuntimeError(
             "runtime bundle contains missing or additional non-manifest files"
         )
+    if {item["path"] for item in source_files} != EXPECTED_SOURCE_FILES:
+        raise GitHubReleaseRuntimeError(
+            "live release source contains missing or additional files"
+        )
+    expected = [inventory[path] for path in sorted(inventory)]
+    _require_equal(runtime_files, expected, label="runtime bundle inventory")
+    _require_equal(source_files, expected, label="live release source inventory")
     return {
         "status": "VERIFIED",
         "files_checked": len(inventory),
-        "manifest_sha256": sha256_file(root / "manifest.json"),
-        "files": [inventory[path] for path in sorted(inventory)],
+        "manifest_sha256": f"sha256:{sha256_file(manifest_path)}",
+        "source_set_digest": _canonical_inventory_digest(expected),
+        "files": expected,
+    }
+
+
+def validate_cli_report(
+    report: dict[str, Any],
+    *,
+    expected_manifest_sha256: str,
+    expected_source_set_digest: str,
+) -> dict[str, Any]:
+    """Bind installed CLI success to the exact runtime manifest and source inventory."""
+    _exact_keys(
+        report,
+        {
+            "status",
+            "schema_version",
+            "files_checked",
+            "mismatches",
+            "manifest_sha256",
+            "source_set_digest",
+        },
+        label="installed CLI report",
+    )
+    if report.get("schema_version") != 1 or report.get("status") != "VERIFIED":
+        raise GitHubReleaseRuntimeError(
+            "installed ibex-av report must be schema v1 VERIFIED"
+        )
+    if report.get("files_checked") != len(EXPECTED_SOURCE_FILES):
+        raise GitHubReleaseRuntimeError(
+            "installed ibex-av verified an unexpected file count"
+        )
+    if report.get("mismatches") != []:
+        raise GitHubReleaseRuntimeError(
+            "installed ibex-av reported integrity mismatches"
+        )
+    manifest_sha = _digest(
+        report.get("manifest_sha256"), label="installed CLI manifest digest"
+    )
+    source_set_digest = _digest(
+        report.get("source_set_digest"),
+        label="installed CLI source-set digest",
+    )
+    _require_equal(
+        manifest_sha,
+        expected_manifest_sha256,
+        label="installed CLI manifest digest",
+    )
+    _require_equal(
+        source_set_digest,
+        expected_source_set_digest,
+        label="installed CLI source-set digest",
+    )
+    return {
+        "status": "VERIFIED",
+        "files_checked": report["files_checked"],
+        "mismatches": [],
+        "manifest_sha256": manifest_sha,
+        "source_set_digest": source_set_digest,
     }
 
 
@@ -395,6 +604,7 @@ def extract_live_release(
     expected_release_tag: str,
     expected_asset_name: str,
 ) -> dict[str, Any]:
+    """Observe, hash, and safely extract one exact public Release asset."""
     downloaded_asset = _single_file(
         release_download_dir, label="live release download directory"
     )
@@ -409,7 +619,9 @@ def extract_live_release(
     )
     live_digest = observation["asset"]["downloaded_digest"]
     if live_digest is None:
-        raise GitHubReleaseRuntimeError("live release download lacks a SHA-256 digest")
+        raise GitHubReleaseRuntimeError(
+            "live release download lacks a SHA-256 digest"
+        )
     synthetic_selection = {
         "schema_version": 1,
         "status": "SELECTED",
@@ -446,26 +658,34 @@ def _validate_promoted_release_source(
     expected_promotion_workflow: str,
 ) -> dict[str, Any]:
     provenance = load_json_object(
-        source_dir / "source-provenance.json", label="released source provenance"
+        source_dir / "source-provenance.json",
+        label="released source provenance",
     )
     deployment = provenance.get("deployment")
     if not isinstance(deployment, dict):
-        raise GitHubReleaseRuntimeError("released source lacks deployment metadata")
+        raise GitHubReleaseRuntimeError(
+            "released source lacks deployment metadata"
+        )
     promotion_workflow = workflow(
         expected_promotion_workflow, label="expected promotion workflow"
     )
     _require_equal(
-        deployment.get("workflow"), promotion_workflow, label="released source workflow"
+        deployment.get("workflow"),
+        promotion_workflow,
+        label="released source workflow",
     )
     promotion_run_id = positive_int(
         deployment.get("run_id"), label="released source promotion run id"
     )
     promotion_run_attempt = positive_int(
-        deployment.get("run_attempt"), label="released source promotion run attempt"
+        deployment.get("run_attempt"),
+        label="released source promotion run attempt",
     )
     destination = provenance.get("destination")
     if not isinstance(destination, dict):
-        raise GitHubReleaseRuntimeError("released source lacks destination metadata")
+        raise GitHubReleaseRuntimeError(
+            "released source lacks destination metadata"
+        )
     _require_equal(
         destination.get("environment"),
         _PROMOTION_ENVIRONMENT,
@@ -516,18 +736,6 @@ def _write_source_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
-def _source_inventory(root: Path) -> list[dict[str, Any]]:
-    return [
-        {
-            "path": path.relative_to(root).as_posix(),
-            "size_bytes": path.stat().st_size,
-            "sha256": sha256_file(path),
-        }
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    ]
-
-
 def _build_transition_source(
     *,
     output_dir: Path,
@@ -552,10 +760,14 @@ def _build_transition_source(
     (output / "evidence").mkdir()
     runtime_workflow = workflow(runtime_workflow, label="runtime workflow")
     runtime_run_id = positive_int(runtime_run_id, label="runtime run id")
-    runtime_run_attempt = positive_int(runtime_run_attempt, label="runtime run attempt")
+    runtime_run_attempt = positive_int(
+        runtime_run_attempt, label="runtime run attempt"
+    )
     destination = {
         "environment": _RUNTIME_ENVIRONMENT,
-        "identity": _runtime_identity(repository_id, runtime_run_id, runtime_run_attempt),
+        "identity": _runtime_identity(
+            repository_id, runtime_run_id, runtime_run_attempt
+        ),
     }
     deployment = {
         "workflow": runtime_workflow,
@@ -568,13 +780,16 @@ def _build_transition_source(
     asset = release_observation["asset"]
     subject_digest = asset["downloaded_digest"] or asset["api_digest"]
     if subject_digest is None:
-        raise GitHubReleaseRuntimeError("live release observation lacks an asset digest")
+        raise GitHubReleaseRuntimeError(
+            "live release observation lacks an asset digest"
+        )
     release_id = (
         f"runtime/github-release/{release['id']}/{asset['id']}/"
         f"run/{runtime_run_id}/attempt/{runtime_run_attempt}"
     )
     transition_id = (
-        f"github/runtime/{source_commit[:12]}/{runtime_run_id}/{runtime_run_attempt}"
+        f"github/runtime/{source_commit[:12]}/"
+        f"{runtime_run_id}/{runtime_run_attempt}"
     )
     common = {
         "schema_version": 1,
@@ -593,6 +808,7 @@ def _build_transition_source(
         "wheel was installed with --no-index --no-deps into a fresh virtual environment",
         f"isolated Python {install['python_version']} imported the package from the virtual environment",
         f"installed ibex-av verified {cli['files_checked']} exact release-source files with no mismatches",
+        f"installed ibex-av bound manifest {cli['manifest_sha256']} and source set {cli['source_set_digest']}",
         f"runtime manifest SHA-256 {runtime_manifest['manifest_sha256']} matched the executed bundle",
         "execution occurred on a GitHub-hosted Ubuntu 24.04 runner and did not claim a customer-controlled host",
     ]
@@ -654,7 +870,8 @@ def _build_transition_source(
             **common,
             "kind": "production-transition-result",
             "deployment_id": (
-                f"github-actions/runtime/run/{runtime_run_id}/attempt/{runtime_run_attempt}"
+                f"github-actions/runtime/run/{runtime_run_id}/"
+                f"attempt/{runtime_run_attempt}"
             ),
             "subject_digest": subject_digest,
             "status": "SUCCEEDED",
@@ -671,18 +888,18 @@ def _build_transition_source(
     for relative, payload in payloads.items():
         _write_source_json(output / relative, payload)
     inventory = _source_inventory(output)
-    source_set_digest = hashlib.sha256(
-        json.dumps(inventory, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    ).hexdigest()
     return {
         "root": output,
         "transition_id": transition_id,
         "deployment": deployment,
         "destination": destination,
-        "release": {"release_id": release_id, "subject_digest": subject_digest},
+        "release": {
+            "release_id": release_id,
+            "subject_digest": subject_digest,
+        },
         "claim_boundary": _CLAIM_BOUNDARY,
         "files": inventory,
-        "source_set_digest": f"sha256:{source_set_digest}",
+        "source_set_digest": _canonical_inventory_digest(inventory),
     }
 
 
@@ -708,11 +925,12 @@ def build_runtime_source(
     runtime_run_id: int,
     runtime_run_attempt: int,
 ) -> dict[str, Any]:
+    """Build exact runtime transition evidence from independently observed inputs."""
     repo = repository(expected_repository, label="expected repository")
-    repo_id = positive_int(expected_repository_id, label="expected repository id")
-    source_commit = text(expected_commit, label="expected commit", maximum=40)
-    if re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
-        raise GitHubReleaseRuntimeError("expected commit must be 40 lowercase hex")
+    repo_id = positive_int(
+        expected_repository_id, label="expected repository id"
+    )
+    source_commit = _commit(expected_commit, label="expected commit")
     downloaded_asset = _single_file(
         release_download_dir, label="live release download directory"
     )
@@ -747,9 +965,15 @@ def build_runtime_source(
         expected_version=package_version,
         expected_wheel=wheel,
     )
-    cli = validate_cli_report(cli_report)
     manifest = validate_runtime_manifest(
-        runtime_manifest, runtime_bundle_dir=runtime_bundle_dir
+        runtime_manifest,
+        runtime_bundle_dir=runtime_bundle_dir,
+        source_dir=source_dir,
+    )
+    cli = validate_cli_report(
+        cli_report,
+        expected_manifest_sha256=manifest["manifest_sha256"],
+        expected_source_set_digest=manifest["source_set_digest"],
     )
     runtime_source = _build_transition_source(
         output_dir=output_dir,
@@ -806,27 +1030,43 @@ def observe_runtime_source(
     expected_release_tag: str,
     expected_asset_name: str,
 ) -> dict[str, Any]:
+    """Independently bind runtime provenance to a live release and exact run identity."""
     repo = repository(expected_repository, label="expected repository")
-    repo_id = positive_int(expected_repository_id, label="expected repository id")
-    source_commit = text(expected_commit, label="expected commit", maximum=40)
-    if re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
-        raise GitHubReleaseRuntimeError("expected commit must be 40 lowercase hex")
+    repo_id = positive_int(
+        expected_repository_id, label="expected repository id"
+    )
+    source_commit = _commit(expected_commit, label="expected commit")
     runtime_workflow = workflow(
         expected_runtime_workflow, label="expected runtime workflow"
     )
-    run_id = positive_int(expected_runtime_run_id, label="expected runtime run id")
+    run_id = positive_int(
+        expected_runtime_run_id, label="expected runtime run id"
+    )
     run_attempt = positive_int(
         expected_runtime_run_attempt, label="expected runtime run attempt"
     )
-    if provenance.get("schema_version") != 1 or provenance.get("kind") != "production-transition-source":
-        raise GitHubReleaseRuntimeError("runtime provenance must be production source v1")
-    _require_equal(provenance.get("repository"), repo, label="runtime provenance repository")
+    if (
+        provenance.get("schema_version") != 1
+        or provenance.get("kind") != "production-transition-source"
+    ):
+        raise GitHubReleaseRuntimeError(
+            "runtime provenance must be production source v1"
+        )
     _require_equal(
-        provenance.get("source_commit"), source_commit, label="runtime provenance commit"
+        provenance.get("repository"),
+        repo,
+        label="runtime provenance repository",
+    )
+    _require_equal(
+        provenance.get("source_commit"),
+        source_commit,
+        label="runtime provenance commit",
     )
     deployment = provenance.get("deployment")
     if not isinstance(deployment, dict):
-        raise GitHubReleaseRuntimeError("runtime provenance lacks deployment")
+        raise GitHubReleaseRuntimeError(
+            "runtime provenance lacks deployment"
+        )
     for key, expected in {
         "workflow": runtime_workflow,
         "run_id": run_id,
@@ -834,10 +1074,16 @@ def observe_runtime_source(
         "event": "workflow_run",
         "branch": "main",
     }.items():
-        _require_equal(deployment.get(key), expected, label=f"runtime deployment {key}")
+        _require_equal(
+            deployment.get(key),
+            expected,
+            label=f"runtime deployment {key}",
+        )
     release_meta = provenance.get("release")
     if not isinstance(release_meta, dict):
-        raise GitHubReleaseRuntimeError("runtime provenance lacks release metadata")
+        raise GitHubReleaseRuntimeError(
+            "runtime provenance lacks release metadata"
+        )
     observation = observe_release(
         release=release,
         expected_repository=repo,
@@ -850,7 +1096,9 @@ def observe_runtime_source(
     expected_destination = _runtime_identity(repo_id, run_id, run_attempt)
     destination = provenance.get("destination")
     if not isinstance(destination, dict):
-        raise GitHubReleaseRuntimeError("runtime provenance lacks destination")
+        raise GitHubReleaseRuntimeError(
+            "runtime provenance lacks destination"
+        )
     _require_equal(
         destination.get("environment"),
         _RUNTIME_ENVIRONMENT,
@@ -861,12 +1109,11 @@ def observe_runtime_source(
         expected_destination,
         label="runtime destination identity",
     )
-    claim_boundary = provenance.get("claim_boundary")
-    if (
-        not isinstance(claim_boundary, str)
-        or "not a physical production execution claim" not in claim_boundary
-    ):
-        raise GitHubReleaseRuntimeError("runtime claim boundary is missing")
+    _require_equal(
+        provenance.get("claim_boundary"),
+        _CLAIM_BOUNDARY,
+        label="runtime claim boundary",
+    )
     return {
         "schema_version": 1,
         "kind": "github-release-runtime-observation",
@@ -878,13 +1125,16 @@ def observe_runtime_source(
         "runtime_run_attempt": run_attempt,
         "destination_id": expected_destination,
         "release": observation,
-        "claim_boundary": claim_boundary,
+        "claim_boundary": _CLAIM_BOUNDARY,
     }
 
 
 def append_outputs(path: Path, observation: dict[str, Any]) -> None:
+    """Append safe scalar runtime identity outputs for later workflow steps."""
     if path.is_symlink() or path.is_dir():
-        raise GitHubReleaseRuntimeError(f"GitHub output path is unsafe: {path}")
+        raise GitHubReleaseRuntimeError(
+            f"GitHub output path is unsafe: {path}"
+        )
     values = {
         "destination-id": observation["destination_id"],
         "runtime-run-id": str(observation["runtime_run_id"]),
@@ -893,13 +1143,17 @@ def append_outputs(path: Path, observation: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         for key, value in values.items():
             if not value or "\n" in value or "\r" in value:
-                raise GitHubReleaseRuntimeError(f"unsafe GitHub output value: {key}")
+                raise GitHubReleaseRuntimeError(
+                    f"unsafe GitHub output value: {key}"
+                )
             handle.write(f"{key}={value}\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Extract, build, or independently observe release runtime evidence"
+        description=(
+            "Extract, build, or independently observe release runtime evidence"
+        )
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -944,7 +1198,9 @@ def build_parser() -> argparse.ArgumentParser:
     observe.add_argument("--expected-commit", required=True)
     observe.add_argument("--expected-runtime-workflow", required=True)
     observe.add_argument("--expected-runtime-run-id", type=int, required=True)
-    observe.add_argument("--expected-runtime-run-attempt", type=int, required=True)
+    observe.add_argument(
+        "--expected-runtime-run-attempt", type=int, required=True
+    )
     observe.add_argument("--expected-release-tag", required=True)
     observe.add_argument("--expected-asset-name", required=True)
     observe.add_argument("--github-output", type=Path, required=True)
@@ -955,7 +1211,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        release = load_json_object(args.release_api_json, label="GitHub release API response")
+        release = load_json_object(
+            args.release_api_json, label="GitHub release API response"
+        )
         if args.command == "extract":
             result = extract_live_release(
                 release=release,
@@ -967,7 +1225,9 @@ def main(argv: list[str] | None = None) -> int:
                 expected_release_tag=args.expected_release_tag,
                 expected_asset_name=args.expected_asset_name,
             )
-            write_json(args.report, result, forbidden_root=args.output_dir)
+            write_json(
+                args.report, result, forbidden_root=args.output_dir
+            )
         elif args.command == "build":
             result = build_runtime_source(
                 source_dir=args.source_dir,
@@ -996,11 +1256,14 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_run_id=args.runtime_run_id,
                 runtime_run_attempt=args.runtime_run_attempt,
             )
-            write_json(args.report, result, forbidden_root=args.output_dir)
+            write_json(
+                args.report, result, forbidden_root=args.output_dir
+            )
         else:
             result = observe_runtime_source(
                 provenance=load_json_object(
-                    args.source_provenance, label="runtime source provenance"
+                    args.source_provenance,
+                    label="runtime source provenance",
                 ),
                 release=release,
                 expected_repository=args.expected_repository,
@@ -1022,7 +1285,10 @@ def main(argv: list[str] | None = None) -> int:
         GitHubReleaseRuntimeError,
         ValueError,
     ) as error:
-        print(f"GitHub release runtime source error: {error}", file=sys.stderr)
+        print(
+            f"GitHub release runtime source error: {error}",
+            file=sys.stderr,
+        )
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
