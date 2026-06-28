@@ -9,6 +9,7 @@ from scripts.publish_trusted_artifact_ingestion_receipt import (
 
 REPOSITORY = "safal207/ibex-agent-verification"
 COMMIT = "a" * 40
+SOURCE_WORKFLOW = ".github/workflows/ibex-evidence-promotion.yml"
 PRODUCER_RUN_ID = 222222222
 SOURCE_RUN_ID = 111111111
 FINAL_ARTIFACT_ID = 333333333
@@ -28,6 +29,7 @@ def audit():
         "status": "VERIFIED",
         "repository": REPOSITORY,
         "source_commit": COMMIT,
+        "source_workflow": SOURCE_WORKFLOW,
         "manifest_sha256": "1" * 64,
         "receipt_sha256": "2" * 64,
         "gate_report_sha256": "3" * 64,
@@ -68,6 +70,7 @@ class TrustedArtifactIngestionReceiptTests(unittest.TestCase):
             "trusted-transition-artifact-ingestion-receipt",
         )
         self.assertEqual(payload["source_commit"], COMMIT)
+        self.assertEqual(payload["source_workflow"], SOURCE_WORKFLOW)
         self.assertEqual(payload["source_run_id"], SOURCE_RUN_ID)
         self.assertEqual(payload["source_run_attempt"], 2)
         self.assertEqual(payload["producer_run_id"], PRODUCER_RUN_ID)
@@ -105,6 +108,16 @@ class TrustedArtifactIngestionReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(
             IngestionReceiptError,
             "does not bind the commit",
+        ):
+            render(payload)
+
+    def test_noncanonical_source_workflow_is_rejected(self):
+        payload = audit()
+        payload["source_workflow"] = "../foreign.yml"
+
+        with self.assertRaisesRegex(
+            IngestionReceiptError,
+            "canonical workflow path",
         ):
             render(payload)
 
