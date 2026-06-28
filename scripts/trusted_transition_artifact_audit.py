@@ -37,6 +37,25 @@ except ImportError:
     )
 
 
+_CLAIM_LIMITATION_MARKERS = (
+    "not a production deployment claim",
+    "not a physical production execution claim",
+)
+
+
+def _claim_boundary(value: Any) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > 2000
+        or not any(marker in value for marker in _CLAIM_LIMITATION_MARKERS)
+    ):
+        raise TrustedTransitionArtifactError(
+            "source claim boundary must contain an explicit production limitation"
+        )
+    return value.strip()
+
+
 def audit_signed_reference(
     *,
     root_dir: Path,
@@ -86,12 +105,7 @@ def audit_signed_reference(
         raise TrustedTransitionArtifactError("source provenance commit mismatch")
     if provenance.get("kind") != "production-transition-source":
         raise TrustedTransitionArtifactError("unexpected source provenance kind")
-    claim_boundary = provenance.get("claim_boundary")
-    if (
-        not isinstance(claim_boundary, str)
-        or "not a production deployment claim" not in claim_boundary
-    ):
-        raise TrustedTransitionArtifactError("source claim boundary is missing")
+    claim_boundary = _claim_boundary(provenance.get("claim_boundary"))
     deployment = provenance.get("deployment")
     if not isinstance(deployment, dict):
         raise TrustedTransitionArtifactError("source provenance deployment is missing")
