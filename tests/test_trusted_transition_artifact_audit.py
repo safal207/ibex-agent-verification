@@ -11,6 +11,7 @@ REPOSITORY = "safal207/ibex-agent-verification"
 COMMIT = "a" * 40
 RUN_ID = 123456789
 RUN_ATTEMPT = 2
+SOURCE_WORKFLOW = ".github/workflows/ibex-evidence-promotion.yml"
 SIGNER = f"{REPOSITORY}/.github/workflows/trusted-transition-artifact.yml"
 CLAIM = (
     "This signed reference bundle verifies trusted cross-workflow artifact ingestion "
@@ -44,7 +45,11 @@ def build_chain(root: Path):
             "kind": "production-transition-source",
             "repository": REPOSITORY,
             "source_commit": COMMIT,
-            "deployment": {"run_id": RUN_ID, "run_attempt": RUN_ATTEMPT},
+            "deployment": {
+                "workflow": SOURCE_WORKFLOW,
+                "run_id": RUN_ID,
+                "run_attempt": RUN_ATTEMPT,
+            },
             "claim_boundary": CLAIM,
         },
     )
@@ -68,6 +73,7 @@ def build_chain(root: Path):
             "status": "SELECTED",
             "repository": REPOSITORY,
             "head_sha": COMMIT,
+            "workflow": SOURCE_WORKFLOW,
             "run_id": RUN_ID,
             "run_attempt": RUN_ATTEMPT,
             "artifact": {
@@ -93,6 +99,11 @@ def build_chain(root: Path):
             "status": "VALIDATED",
             "repository": REPOSITORY,
             "source_commit": COMMIT,
+            "deployment": {
+                "workflow": SOURCE_WORKFLOW,
+                "run_id": RUN_ID,
+                "run_attempt": RUN_ATTEMPT,
+            },
             "files_checked": 6,
             "claim_boundary": CLAIM,
         },
@@ -114,9 +125,7 @@ def build_chain(root: Path):
         {
             "schema_version": 4,
             "decision": "PASS",
-            "transition_manifest": {
-                "attestation": {"status": "VERIFIED"}
-            },
+            "transition_manifest": {"attestation": {"status": "VERIFIED"}},
             "source": {"transition_manifest_sha256": manifest_sha},
         },
     )
@@ -134,11 +143,13 @@ class TrustedTransitionArtifactAuditTests(unittest.TestCase):
                 expected_commit=COMMIT,
                 expected_run_id=RUN_ID,
                 expected_run_attempt=RUN_ATTEMPT,
+                expected_source_workflow=SOURCE_WORKFLOW,
                 expected_signer_workflow=SIGNER,
             )
 
             self.assertEqual(result["status"], "VERIFIED")
             self.assertEqual(result["files_checked"], 6)
+            self.assertEqual(result["source_workflow"], SOURCE_WORKFLOW)
             self.assertEqual(result["source_artifact"]["run_id"], RUN_ID)
             self.assertRegex(result["manifest_sha256"], r"^[0-9a-f]{64}$")
 
@@ -157,9 +168,29 @@ class TrustedTransitionArtifactAuditTests(unittest.TestCase):
                     expected_commit=COMMIT,
                     expected_run_id=RUN_ID,
                     expected_run_attempt=RUN_ATTEMPT,
+                    expected_source_workflow=SOURCE_WORKFLOW,
                     expected_signer_workflow=(
                         f"{REPOSITORY}/.github/workflows/foreign.yml"
                     ),
+                )
+
+    def test_foreign_source_workflow_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_chain(root)
+
+            with self.assertRaisesRegex(
+                TrustedTransitionArtifactError,
+                "workflow mismatch",
+            ):
+                audit_signed_reference(
+                    root_dir=root,
+                    expected_repository=REPOSITORY,
+                    expected_commit=COMMIT,
+                    expected_run_id=RUN_ID,
+                    expected_run_attempt=RUN_ATTEMPT,
+                    expected_source_workflow=".github/workflows/foreign.yml",
+                    expected_signer_workflow=SIGNER,
                 )
 
 
