@@ -1,0 +1,188 @@
+name: Ibex Evidence Promotion
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ibex-e2e.yml"
+      - ".github/workflows/ibex-evidence-promotion.yml"
+      - ".github/workflows/trusted-transition-artifact.yml"
+      - "scripts/ibex_evidence_promotion.py"
+      - "scripts/trusted_transition_artifact.py"
+      - "scripts/production_transition_source.py"
+      - "scripts/trusted_transition_artifact_audit.py"
+      - "scripts/publish_trusted_artifact_ingestion_receipt.py"
+      - "tests/test_ibex_evidence_promotion.py"
+      - "tests/test_trusted_transition_artifact*.py"
+      - "tests/test_publish_trusted_artifact_ingestion_receipt.py"
+      - "tests/fixtures/proofqa/trusted-artifact-ingestion-contract.json"
+      - "docs/TRUSTED_TRANSITION_ARTIFACT_INGESTION.md"
+  workflow_run:
+    workflows: ["Ibex Verilator E2E"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ibex-evidence-promotion-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: Test promotion and source contracts
+        run: |
+          python -m unittest -v \
+            tests.test_ibex_evidence_promotion \
+            tests.test_production_transition_source \
+            tests.test_trusted_transition_artifact \
+            tests.test_trusted_transition_artifact_audit \
+            tests.test_trusted_transition_artifact_workflow \
+            tests.test_publish_trusted_artifact_ingestion_receipt
+
+  promote:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ibex-evidence-release
+    permissions:
+      contents: read
+      actions: read
+    env:
+      EXPECTED_IBEX_REF: 022f084096baed0a9b5ebdf697ed2965f13e8ed8
+      DESTINATION_ENVIRONMENT: ibex-evidence-release
+    steps:
+      - name: Check out exact successful E2E commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: Require immutable E2E trigger identity
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Select exact Ibex E2E artifact
+        id: e2e-artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          E2E_RUN_ID: ${{ github.event.workflow_run.id }}
+          E2E_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          HEAD_REPOSITORY_ID: ${{ github.event.workflow_run.head_repository.id }}
+          ARTIFACT_NAME: ibex-verilator-evidence-${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/ibex-evidence-promotion-reports
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$E2E_RUN_ID/artifacts?name=$ARTIFACT_NAME&per_page=100" \
+            > artifacts/ibex-evidence-promotion-reports/e2e-artifacts-api.json
+          python scripts/trusted_transition_artifact.py select \
+            --api-json artifacts/ibex-evidence-promotion-reports/e2e-artifacts-api.json \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-repository-id "$REPOSITORY_ID" \
+            --expected-head-repository-id "$HEAD_REPOSITORY_ID" \
+            --expected-run-id "$E2E_RUN_ID" \
+            --expected-run-attempt "$E2E_RUN_ATTEMPT" \
+            --expected-workflow .github/workflows/ibex-e2e.yml \
+            --expected-head-branch main \
+            --expected-head-sha "$SOURCE_SHA" \
+            --expected-name "$ARTIFACT_NAME" \
+            --report artifacts/ibex-evidence-promotion-reports/e2e-artifact-selection.json \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Download raw Ibex evidence archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ steps.e2e-artifact.outputs.artifact-id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          path: ${{ runner.temp }}/ibex-e2e-download
+          skip-decompress: true
+          digest-mismatch: error
+      - name: Safely promote exact E2E evidence
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          E2E_RUN_ID: ${{ github.event.workflow_run.id }}
+          E2E_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+          DESTINATION_ID="github-actions:repository-id:${REPOSITORY_ID}:environment:${DESTINATION_ENVIRONMENT}"
+          python scripts/ibex_evidence_promotion.py \
+            --download-dir "$RUNNER_TEMP/ibex-e2e-download" \
+            --selection artifacts/ibex-evidence-promotion-reports/e2e-artifact-selection.json \
+            --extracted-dir "$RUNNER_TEMP/ibex-e2e-evidence" \
+            --output-dir artifacts/ibex-production-transition-source \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-commit "$SOURCE_SHA" \
+            --expected-e2e-workflow .github/workflows/ibex-e2e.yml \
+            --expected-e2e-run-id "$E2E_RUN_ID" \
+            --expected-e2e-run-attempt "$E2E_RUN_ATTEMPT" \
+            --expected-ibex-ref "$EXPECTED_IBEX_REF" \
+            --promotion-workflow .github/workflows/ibex-evidence-promotion.yml \
+            --promotion-run-id "$GITHUB_RUN_ID" \
+            --promotion-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --promotion-event workflow_run \
+            --branch main \
+            --destination-environment "$DESTINATION_ENVIRONMENT" \
+            --destination-id "$DESTINATION_ID" \
+            --report artifacts/ibex-evidence-promotion-reports/promotion.json
+          ibex-av verify-evidence \
+            --manifest "$RUNNER_TEMP/ibex-e2e-evidence/manifest.json" \
+            --report artifacts/ibex-evidence-promotion-reports/evidence-verification.json
+          python scripts/production_transition_source.py \
+            --source-dir artifacts/ibex-production-transition-source \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-commit "$SOURCE_SHA" \
+            --expected-workflow .github/workflows/ibex-evidence-promotion.yml \
+            --expected-run-id "$GITHUB_RUN_ID" \
+            --expected-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --expected-event workflow_run \
+            --expected-branch main \
+            --expected-environment "$DESTINATION_ENVIRONMENT" \
+            --expected-destination-id "$DESTINATION_ID" \
+            --report artifacts/ibex-evidence-promotion-reports/source-validation.json
+      - name: Upload exact production transition source
+        id: upload-source
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: proofqa-transition-source-${{ github.event.workflow_run.head_sha }}
+          path: artifacts/ibex-production-transition-source
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload promotion audit reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ibex-evidence-promotion-audit-${{ github.event.workflow_run.head_sha }}
+          path: artifacts/ibex-evidence-promotion-reports
+          if-no-files-found: error
+          retention-days: 30
