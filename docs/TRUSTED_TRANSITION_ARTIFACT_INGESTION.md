@@ -1,57 +1,70 @@
 # Trusted Transition Artifact Ingestion
 
-This integration connects the existing production-source validator and trusted manifest signer to a real Ibex Verilator evidence artifact produced by GitHub Actions.
+This integration connects a real pinned Ibex Verilator run to a customer-consumable GitHub Release, observes the published bytes through the live release service, and only then signs the deployment evidence.
 
-The chain proves that an exact pinned RTL simulation artifact was integrity-checked, promoted into a repository-bound GitHub Environment, transformed into the six-file transition-source contract, signed, and verified. It does not claim physical-hardware behavior, customer deployment, application correctness, or a production deployment.
+The chain proves integrity-preserving publication of one exact transition-source ZIP to a repository-bound public release destination. It does not claim that a customer installed or executed the asset, that physical hardware behaved correctly, that the application is correct, or that an independent human approved the deployment.
 
 ## Live workflow chain
 
 ```text
 Ibex Verilator E2E succeeds on main
-  - checks out the verification project
   - builds the pinned lowRISC/ibex commit
   - runs Verilator and the hello firmware
   - parses architectural and timing evidence
-  - verifies the evidence manifest
+  - verifies the exact evidence manifest
   - uploads ibex-verilator-evidence-{commit}
                     ↓
 Ibex Evidence Promotion
-  - runs only after the exact successful E2E workflow
-  - enters the ibex-evidence-release GitHub Environment
-  - selects one exact E2E artifact from the triggering run
-  - downloads the raw ZIP and rechecks its GitHub SHA-256
-  - safely extracts the archive
-  - verifies every manifest-listed file and rejects extras
+  - enters ibex-evidence-release
+  - selects the exact E2E artifact and raw ZIP digest
+  - safely extracts and verifies every manifest-listed file
   - binds the project commit and pinned Ibex commit
-  - checks simulator completion, firmware markers, parser status,
-    causal enrichment, and full retirement alignment
-  - emits the six-file production transition-source contract
-  - validates that source with no signing authority
+  - checks simulator completion, parser status, causal enrichment,
+    and full retirement alignment
+  - emits and validates the six-file staging transition source
+  - has no signing authority
+                    ↓
+GitHub Release Production Deployment
+  - enters ibex-customer-release
+  - selects the exact promotion source from the triggering run
+  - revalidates it before publication
+  - creates or reuses the commit-specific public release
+    ibex-evidence-{commit}
+  - permits exactly one asset:
+    proofqa-transition-source-{commit}.zip
+  - refuses mutation when unexpected assets exist
+  - downloads the published asset from the live release service
+  - proves live bytes match the promoted source SHA-256
+  - emits a new production transition source bound to repository ID,
+    release ID, asset ID, tag, and digest
+  - has no OIDC or attestation permission
                     ↓
 Trusted Transition Artifact Ingestion
-  - runs only after the exact promotion workflow succeeds
-  - selects and safely extracts the exact source artifact
-  - validates repository, commit, run, workflow, environment,
-    destination identity, release digest, and evidence consistency
-  - builds manifest.json after source bytes are final
+  - runs only after the exact release deployment succeeds
+  - selects and safely extracts the exact production source artifact
+  - independently fetches the public release through the GitHub API
+  - compares live release and asset identity with source provenance
+  - validates repository, commit, workflow, run, environment,
+    destination identity, subject digest, and evidence consistency
+  - builds manifest.json only after source bytes are final
   - attests only manifest.json through GitHub OIDC
   - verifies online and bundled Sigstore evidence through ProofQA
   - audits and uploads the complete trust chain
   - publishes a non-authoritative discovery receipt
 ```
 
-The deterministic `ProofQA Transition Source Artifact` reference workflow remains available for regression testing, but it no longer triggers the privileged signer.
+The deterministic `ProofQA Transition Source Artifact` workflow remains available for regression testing, but it does not trigger the privileged signer.
 
-## Real observation and claim boundary
+## Real observations
 
-The promoted subject is the exact GitHub Actions ZIP artifact produced by `Ibex Verilator E2E`. Its GitHub artifact SHA-256 becomes `release.subject_digest` throughout the transition evidence.
+### RTL evidence observation
 
-The observation requires:
+The first observation requires:
 
 - the exact successful `main` workflow run and attempt;
 - the exact repository and head commit;
-- the exact artifact name `ibex-verilator-evidence-{commit}`;
-- the pinned lowRISC/ibex commit `022f084096baed0a9b5ebdf697ed2965f13e8ed8` as both requested and resolved ref;
+- artifact name `ibex-verilator-evidence-{commit}`;
+- pinned lowRISC/ibex commit `022f084096baed0a9b5ebdf697ed2965f13e8ed8` as requested and resolved ref;
 - Verilator configuration `small` and the hello-test ELF;
 - simulation exit code `0`;
 - trace parser status `PARSED`;
@@ -60,33 +73,57 @@ The observation requires:
 - expected firmware and simulator-completion markers;
 - an exact evidence manifest with no missing or additional files.
 
-Timing-analyzer findings are preserved as evidence. Promotion does not reinterpret a detected timing anomaly as correctness or failure.
+Timing-analyzer findings are preserved as evidence. The workflow does not reinterpret a timing anomaly as correctness or failure.
+
+### Customer release observation
+
+The production oracle requires:
+
+- tag `ibex-evidence-{commit}`;
+- `target_commitish` equal to the exact 40-character source commit;
+- a published, non-draft, non-prerelease release;
+- canonical repository API and HTML URLs;
+- exactly one asset named `proofqa-transition-source-{commit}.zip`;
+- asset state `uploaded` and ZIP-compatible content type;
+- canonical asset API and browser download URLs;
+- the re-downloaded live asset size and SHA-256 equal to the promoted source archive;
+- no unexpected release assets.
+
+A rerun may reuse an exact existing release and asset, but it never overwrites or adds competing assets. Any inconsistent existing state blocks the workflow.
 
 ## Destination binding
 
-The promotion job targets the GitHub Environment:
+The staging promotion uses:
 
 ```text
-ibex-evidence-release
+Environment: ibex-evidence-release
+Identity: github-actions:repository-id:{repository_id}:environment:ibex-evidence-release
 ```
 
-The source evidence binds it to the platform-oriented identity:
+The customer release uses:
 
 ```text
-github-actions:repository-id:{repository_id}:environment:ibex-evidence-release
+Environment: ibex-customer-release
+Identity: github-release:repository-id:{repository_id}:release-id:{release_id}:asset-id:{asset_id}:tag:ibex-evidence-{commit}
 ```
 
-This is stronger than a free-text environment label because the repository numeric ID is part of the destination identity. Repository administrators may add required reviewers or deployment-branch rules to the GitHub Environment without changing the source contract.
+The production identity binds the stable numeric repository ID and the live release and asset IDs, not just a free-text environment label or URL.
+
+Environment protection is tracked in issue #50. Until required reviewers and deployment-branch restrictions are configured, evidence must not claim independent human approval.
 
 ## Permission boundary
 
-`Ibex Evidence Promotion` receives only `contents: read` and `actions: read`. It can read the exact upstream artifact and publish a derived source artifact, but it cannot request an OIDC token, create an attestation, or sign its own evidence.
+`Ibex Evidence Promotion` receives only `contents: read` and `actions: read`.
 
-The privileged ingestion workflow receives OIDC and attestation permissions only after the exact promotion workflow succeeds. Pull-request validation remains read-only and cannot promote, sign, or publish receipts.
+`GitHub Release Production Deployment` receives `contents: write` and `actions: read` so it can publish the exact public release asset. It cannot request an OIDC token or create an attestation.
+
+`Trusted Transition Artifact Ingestion` receives OIDC and attestation permissions only after the live release deployment workflow succeeds and the signer independently observes the release API state.
+
+Pull-request validation for all three workflows remains read-only and cannot promote, publish a release, sign, or publish receipts.
 
 ## Exact artifact selection
 
-Both artifact boundaries require one and only one exact match. Selection binds:
+Every Actions artifact boundary requires exactly one match and binds:
 
 - repository name and numeric repository ID;
 - triggering run ID and run attempt;
@@ -101,7 +138,7 @@ Missing, duplicated, expired, foreign, oversized, or inconsistently identified a
 
 ## Raw download and safe extraction
 
-Both downloads preserve the raw archive. The promotion and ingestion scripts independently rehash the archive before extraction.
+Actions downloads preserve the raw archive. Each consumer independently rehashes the archive before extraction.
 
 Extraction rejects:
 
@@ -111,15 +148,15 @@ Extraction rejects:
 - symbolic links and other non-regular entries;
 - encrypted entries and unsupported compression methods;
 - excessive entry counts, per-file sizes, and aggregate sizes;
-- files outside the allowed E2E layout;
-- files missing from or added beyond the evidence manifest;
+- files outside the allowed layout;
+- missing or additional source files;
 - output directories that already exist or overlap the download directory.
 
-Zero-byte log files are allowed only when their zero size and empty-file SHA-256 are explicitly listed in the upstream manifest.
+Zero-byte upstream evidence files are accepted only when their zero size and empty-file SHA-256 are explicitly listed in the upstream evidence manifest.
 
 ## Signed source layout
 
-The accepted transition source contains exactly:
+The accepted production transition source contains exactly:
 
 ```text
 source-provenance.json
@@ -130,25 +167,26 @@ evidence/result.json
 evidence/verification.json
 ```
 
-The extracted source becomes `bundle/`. Manifest generation happens only after extraction and source validation complete.
+The extracted source becomes `bundle/`. Manifest generation happens only after extraction, independent live release observation, and source validation complete.
 
-Selection, extraction, promotion, source-validation, manifest-build, attestation, ProofQA, and audit reports remain outside `bundle/`. The verifier therefore cannot modify the bytes it is verifying.
+Selection, extraction, release API responses, live observation, source validation, manifest build, attestation, ProofQA, and audit reports remain outside `bundle/`. The verifier therefore cannot modify the bytes it is verifying.
 
 ## Receipt and authoritative evidence
 
-Issue #42 is a mutable discovery ledger. The artifact-ingestion receipt binds:
+Issue #42 is a mutable discovery ledger. A successful artifact-ingestion receipt binds:
 
-- the exact E2E promotion source workflow, run, attempt, source artifact, and digest;
+- the GitHub Release production source workflow, run, attempt, source artifact, and digest;
+- the exact source commit;
 - the privileged signer workflow and run;
 - the manifest, receipt, ProofQA report, and Sigstore bundle digests;
 - the final signed trust-chain artifact and GitHub artifact digest;
 - `VERIFIED` attestation and `PASS` ProofQA decision;
-- the explicit non-production claim boundary.
+- the explicit customer-release claim boundary.
 
-The receipt comment is not cryptographic evidence. The authoritative records remain the GitHub artifact digests, source bytes, signed manifest, Sigstore bundle, verification reports, ProofQA report, and final audit.
+The receipt comment is not cryptographic evidence. Authoritative records remain the GitHub artifact digests, public release and asset IDs, downloaded bytes, source evidence, signed manifest, Sigstore bundle, verification reports, ProofQA report, and final audit.
 
-## Remaining production step
+## Remaining external-production work
 
-A customer or service deployment can now replace `Ibex Evidence Promotion` while preserving the same downstream selector, safe extractor, source validator, manifest builder, signer restrictions, ProofQA verifier, audit, and receipt protocol.
+The GitHub Release adapter is a real public customer-delivery channel and a real platform oracle, but it is not an installation or runtime oracle.
 
-Such an integration must supply a platform-bound destination oracle and a claim boundary appropriate to the actual deployment. The current Ibex integration deliberately stops at a real CI-hosted evidence release.
+A later adapter may observe a deployed service, device fleet, package registry, or customer environment. It should preserve the same exact-selector, safe-extractor, destination-oracle, source-validator, restricted-signer, ProofQA, audit, and receipt protocol while narrowing its claim to what the external platform can independently prove.
