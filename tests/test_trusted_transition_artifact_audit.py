@@ -3,15 +3,21 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.trusted_transition_artifact import TrustedTransitionArtifactError, sha256_file
-from scripts.trusted_transition_artifact_audit import audit_signed_reference
+from scripts.trusted_transition_artifact import (
+    TrustedTransitionArtifactError,
+    sha256_file,
+)
+from scripts.trusted_transition_artifact_audit import (
+    EXPECTED_ATTESTED_FILES,
+    audit_signed_reference,
+)
 
 
 REPOSITORY = "safal207/ibex-agent-verification"
 COMMIT = "a" * 40
 RUN_ID = 123456789
 RUN_ATTEMPT = 2
-SOURCE_WORKFLOW = ".github/workflows/ibex-evidence-promotion.yml"
+SOURCE_WORKFLOW = ".github/workflows/github-release-runtime-verification.yml"
 SIGNER = f"{REPOSITORY}/.github/workflows/trusted-transition-artifact.yml"
 CLAIM = (
     "This signed reference bundle verifies trusted cross-workflow artifact ingestion "
@@ -22,14 +28,10 @@ RUNTIME_CLAIM = (
     "It does not prove installation or runtime behavior, and it is not a physical "
     "production execution claim."
 )
-FILES = [
-    "evidence/action.json",
-    "evidence/intent.json",
-    "evidence/result.json",
-    "evidence/verification.json",
-    "source-provenance.json",
-    "transition-report.json",
-]
+DESTINATION_ID = (
+    "github-actions:repository-id:1:environment:ibex-runtime-verification:"
+    f"workflow-run:{RUN_ID}:attempt:{RUN_ATTEMPT}:runner:github-hosted-ubuntu-24.04"
+)
 
 
 def write(path: Path, payload):
@@ -55,24 +57,26 @@ def build_chain(root: Path, *, claim=CLAIM):
                 "run_id": RUN_ID,
                 "run_attempt": RUN_ATTEMPT,
             },
+            "destination": {"identity": DESTINATION_ID},
             "claim_boundary": claim,
         },
     )
-    for relative in FILES:
+    for relative in EXPECTED_ATTESTED_FILES:
         path = bundle / relative
-        if not path.exists():
-            write(path, {"fixture": relative})
-    write(
-        bundle / "manifest.json",
-        {
-            "schema_version": 1,
-            "files": [{"path": relative} for relative in FILES],
-        },
-    )
-    manifest_sha = sha256_file(bundle / "manifest.json")
+        if path.exists():
+            continue
+        if relative in {
+            "signer/source-artifact-selection.json",
+            "signer/source-artifact-extraction.json",
+            "signer/runtime-observation.json",
+            "signer/source-validation.json",
+        }:
+            continue
+        write(path, {"fixture": relative})
+
     artifact_digest = "sha256:" + "b" * 64
     write(
-        root / "source-artifact-selection.json",
+        bundle / "signer/source-artifact-selection.json",
         {
             "schema_version": 1,
             "status": "SELECTED",
@@ -89,7 +93,7 @@ def build_chain(root: Path, *, claim=CLAIM):
         },
     )
     write(
-        root / "source-artifact-extraction.json",
+        bundle / "signer/source-artifact-extraction.json",
         {
             "schema_version": 1,
             "status": "EXTRACTED",
@@ -98,7 +102,21 @@ def build_chain(root: Path, *, claim=CLAIM):
         },
     )
     write(
-        root / "source-validation.json",
+        bundle / "signer/runtime-observation.json",
+        {
+            "schema_version": 1,
+            "status": "OBSERVED",
+            "repository": REPOSITORY,
+            "source_commit": COMMIT,
+            "runtime_workflow": SOURCE_WORKFLOW,
+            "runtime_run_id": RUN_ID,
+            "runtime_run_attempt": RUN_ATTEMPT,
+            "destination_id": DESTINATION_ID,
+            "claim_boundary": claim,
+        },
+    )
+    write(
+        bundle / "signer/source-validation.json",
         {
             "schema_version": 1,
             "status": "VALIDATED",
@@ -113,6 +131,17 @@ def build_chain(root: Path, *, claim=CLAIM):
             "claim_boundary": claim,
         },
     )
+    write(
+        bundle / "manifest.json",
+        {
+            "schema_version": 1,
+            "files": [
+                {"path": relative}
+                for relative in sorted(EXPECTED_ATTESTED_FILES)
+            ],
+        },
+    )
+    manifest_sha = sha256_file(bundle / "manifest.json")
     write(
         root / "manifest-receipt.json",
         {
@@ -154,19 +183,22 @@ class TrustedTransitionArtifactAuditTests(unittest.TestCase):
             root = Path(directory)
             build_chain(root)
             result = audit(root)
-
             self.assertEqual(result["status"], "VERIFIED")
-            self.assertEqual(result["files_checked"], 6)
+            self.assertEqual(
+                result["files_checked"], len(EXPECTED_ATTESTED_FILES)
+            )
             self.assertEqual(result["source_workflow"], SOURCE_WORKFLOW)
             self.assertEqual(result["source_artifact"]["run_id"], RUN_ID)
             self.assertRegex(result["manifest_sha256"], r"^[0-9a-f]{64}$")
+            self.assertRegex(
+                result["runtime_observation_sha256"], r"^[0-9a-f]{64}$"
+            )
 
     def test_runtime_limited_production_claim_is_verified(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_chain(root, claim=RUNTIME_CLAIM)
             result = audit(root)
-
             self.assertEqual(result["status"], "VERIFIED")
             self.assertEqual(result["claim_boundary"], RUNTIME_CLAIM)
 
@@ -174,10 +206,41 @@ class TrustedTransitionArtifactAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_chain(root, claim="This release is production ready.")
-
             with self.assertRaisesRegex(
                 TrustedTransitionArtifactError,
                 "explicit production limitation",
+            ):
+                audit(root)
+
+    def test_unsigned_observation_path_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_chain(root)
+            payload = json.loads(
+                (root / "bundle/manifest.json").read_text(encoding="utf-8")
+            )
+            payload["files"] = [
+                item
+                for item in payload["files"]
+                if item["path"] != "signer/runtime-observation.json"
+            ]
+            write(root / "bundle/manifest.json", payload)
+            with self.assertRaisesRegex(
+                TrustedTransitionArtifactError, "exact source plus signer"
+            ):
+                audit(root)
+
+    def test_foreign_observation_run_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_chain(root)
+            path = root / "bundle/signer/runtime-observation.json"
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["runtime_run_id"] = RUN_ID + 1
+            write(path, payload)
+            with self.assertRaisesRegex(
+                TrustedTransitionArtifactError,
+                "observation workflow identity mismatch",
             ):
                 audit(root)
 
@@ -185,10 +248,8 @@ class TrustedTransitionArtifactAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_chain(root)
-
             with self.assertRaisesRegex(
-                TrustedTransitionArtifactError,
-                "signer mismatch",
+                TrustedTransitionArtifactError, "signer mismatch"
             ):
                 audit_signed_reference(
                     root_dir=root,
@@ -206,10 +267,8 @@ class TrustedTransitionArtifactAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_chain(root)
-
             with self.assertRaisesRegex(
-                TrustedTransitionArtifactError,
-                "workflow mismatch",
+                TrustedTransitionArtifactError, "workflow mismatch"
             ):
                 audit_signed_reference(
                     root_dir=root,
