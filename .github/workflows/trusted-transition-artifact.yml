@@ -21,15 +21,30 @@ on:
       - "tests/test_publish_trusted_artifact_ingestion_receipt.py"
       - "tests/fixtures/proofqa/trusted-artifact-ingestion-contract.json"
       - "docs/TRUSTED_TRANSITION_ARTIFACT_INGESTION.md"
-  workflow_run:
-    workflows: ["GitHub Release Runtime Verification"]
-    types: [completed]
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact main-branch commit executed by the runtime oracle.
+        required: true
+        type: string
+      source_run_id:
+        description: Runtime workflow run containing the source artifact.
+        required: true
+        type: number
+      source_run_attempt:
+        description: Runtime workflow run attempt.
+        required: true
+        type: number
+      source_head_repository_id:
+        description: Repository ID recorded by the trusted runtime trigger.
+        required: true
+        type: number
 
 permissions:
   contents: read
 
 concurrency:
-  group: trusted-transition-artifact-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+  group: trusted-transition-artifact-${{ inputs.source_sha || github.event.pull_request.head.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -47,7 +62,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -e .
-      - run: |
+      - name: Test signer and runtime contracts
+        run: |
           python -m unittest -v \
             tests.test_github_release_runtime_source \
             tests.test_github_release_production_source \
@@ -59,12 +75,7 @@ jobs:
             tests.test_publish_trusted_artifact_ingestion_receipt
 
   produce:
-    if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'workflow_run' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+    if: github.event_name == 'workflow_call'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -77,49 +88,54 @@ jobs:
     env:
       SOURCE_WORKFLOW: .github/workflows/github-release-runtime-verification.yml
       DESTINATION_ENVIRONMENT: ibex-runtime-verification
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      SOURCE_RUN_ATTEMPT: ${{ inputs.source_run_attempt }}
+      SOURCE_HEAD_REPOSITORY_ID: ${{ inputs.source_head_repository_id }}
+      REPOSITORY_ID: ${{ github.repository_id }}
     steps:
       - name: Check out exact source commit
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ inputs.source_sha }}
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
       - run: python -m pip install -e .
-      - name: Require immutable trigger identity
-        env:
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      - name: Require immutable reusable-workflow inputs
         run: |
           set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_HEAD_REPOSITORY_ID" =~ ^[1-9][0-9]*$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$SOURCE_RUN_ID" = "$GITHUB_RUN_ID"
+          test "$SOURCE_RUN_ATTEMPT" = "$GITHUB_RUN_ATTEMPT"
+          test "$SOURCE_HEAD_REPOSITORY_ID" = "$REPOSITORY_ID"
           git diff --exit-code
       - name: Select exact runtime source artifact
         id: source-artifact
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
-          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
-          TRIGGER_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          REPOSITORY_ID: ${{ github.repository_id }}
-          HEAD_REPOSITORY_ID: ${{ github.event.workflow_run.head_repository.id }}
-          ARTIFACT_NAME: proofqa-transition-source-${{ github.event.workflow_run.head_sha }}
+          ARTIFACT_NAME: proofqa-transition-source-${{ inputs.source_sha }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/trusted-transition-ingested
           gh api \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "/repos/$GITHUB_REPOSITORY/actions/runs/$TRIGGER_RUN_ID/artifacts?name=$ARTIFACT_NAME&per_page=100" \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?name=$ARTIFACT_NAME&per_page=100" \
             > artifacts/trusted-transition-ingested/source-artifacts-api.json
           python scripts/trusted_transition_artifact.py select \
             --api-json artifacts/trusted-transition-ingested/source-artifacts-api.json \
             --expected-repository "$GITHUB_REPOSITORY" \
             --expected-repository-id "$REPOSITORY_ID" \
-            --expected-head-repository-id "$HEAD_REPOSITORY_ID" \
-            --expected-run-id "$TRIGGER_RUN_ID" \
-            --expected-run-attempt "$TRIGGER_RUN_ATTEMPT" \
+            --expected-head-repository-id "$SOURCE_HEAD_REPOSITORY_ID" \
+            --expected-run-id "$SOURCE_RUN_ID" \
+            --expected-run-attempt "$SOURCE_RUN_ATTEMPT" \
             --expected-workflow "$SOURCE_WORKFLOW" \
             --expected-head-branch main \
             --expected-head-sha "$SOURCE_SHA" \
@@ -132,7 +148,7 @@ jobs:
           artifact-ids: ${{ steps.source-artifact.outputs.artifact-id }}
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ inputs.source_run_id }}
           path: ${{ runner.temp }}/trusted-transition-source-download
           skip-decompress: true
           digest-mismatch: error
@@ -148,10 +164,6 @@ jobs:
         id: runtime-observation
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
-          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
-          TRIGGER_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          REPOSITORY_ID: ${{ github.repository_id }}
         run: |
           set -euo pipefail
           TAG="ibex-evidence-${SOURCE_SHA}"
@@ -168,17 +180,14 @@ jobs:
             --expected-repository-id "$REPOSITORY_ID" \
             --expected-commit "$SOURCE_SHA" \
             --expected-runtime-workflow "$SOURCE_WORKFLOW" \
-            --expected-runtime-run-id "$TRIGGER_RUN_ID" \
-            --expected-runtime-run-attempt "$TRIGGER_RUN_ATTEMPT" \
+            --expected-runtime-run-id "$SOURCE_RUN_ID" \
+            --expected-runtime-run-attempt "$SOURCE_RUN_ATTEMPT" \
             --expected-release-tag "$TAG" \
             --expected-asset-name "$ASSET_NAME" \
             --github-output "$GITHUB_OUTPUT" \
             --report artifacts/trusted-transition-ingested/runtime-observation.json
       - name: Validate exact runtime source
         env:
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
-          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
-          TRIGGER_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           DESTINATION_ID: ${{ steps.runtime-observation.outputs.destination-id }}
         run: |
           set -euo pipefail
@@ -188,15 +197,31 @@ jobs:
             --expected-repository "$GITHUB_REPOSITORY" \
             --expected-commit "$SOURCE_SHA" \
             --expected-workflow "$SOURCE_WORKFLOW" \
-            --expected-run-id "$TRIGGER_RUN_ID" \
-            --expected-run-attempt "$TRIGGER_RUN_ATTEMPT" \
+            --expected-run-id "$SOURCE_RUN_ID" \
+            --expected-run-attempt "$SOURCE_RUN_ATTEMPT" \
             --expected-event workflow_run \
             --expected-branch main \
             --expected-environment "$DESTINATION_ENVIRONMENT" \
             --expected-destination-id "$DESTINATION_ID" \
             --report artifacts/trusted-transition-ingested/source-validation.json
+      - name: Bind signer observations into attested bundle
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/trusted-transition-ingested/bundle/signer
+          for name in \
+            source-artifacts-api.json \
+            source-artifact-selection.json \
+            source-artifact-extraction.json \
+            live-release.json \
+            runtime-observation.json \
+            source-validation.json
+          do
+            mv "artifacts/trusted-transition-ingested/$name" \
+              "artifacts/trusted-transition-ingested/bundle/signer/$name"
+          done
       - name: Build exact final manifest
         run: |
+          set -euo pipefail
           python scripts/proofqa_transition_manifest_builder.py \
             --evidence-dir artifacts/trusted-transition-ingested/bundle \
             --output artifacts/trusted-transition-ingested/bundle/manifest.json \
@@ -237,17 +262,14 @@ jobs:
           fail-on: block
           report-path: artifacts/trusted-transition-ingested/proofqa-gate-report.json
       - name: Audit final runtime trust chain
-        env:
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
-          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
-          TRIGGER_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         run: |
+          set -euo pipefail
           python scripts/trusted_transition_artifact_audit.py \
             --root-dir artifacts/trusted-transition-ingested \
             --expected-repository "$GITHUB_REPOSITORY" \
             --expected-commit "$SOURCE_SHA" \
-            --expected-run-id "$TRIGGER_RUN_ID" \
-            --expected-run-attempt "$TRIGGER_RUN_ATTEMPT" \
+            --expected-run-id "$SOURCE_RUN_ID" \
+            --expected-run-attempt "$SOURCE_RUN_ATTEMPT" \
             --expected-source-workflow "$SOURCE_WORKFLOW" \
             --expected-signer-workflow "$GITHUB_REPOSITORY/.github/workflows/trusted-transition-artifact.yml" \
             --report artifacts/trusted-transition-ingested/final-audit.json
@@ -255,16 +277,13 @@ jobs:
         id: upload-trust-chain
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: trusted-transition-ingested-${{ github.event.workflow_run.head_sha }}
+          name: trusted-transition-ingested-${{ inputs.source_sha }}
           path: artifacts/trusted-transition-ingested
           if-no-files-found: error
           retention-days: 30
       - name: Publish runtime receipt
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
-          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
-          PRODUCER_RUN_ID: ${{ github.run_id }}
           FINAL_ARTIFACT_ID: ${{ steps.upload-trust-chain.outputs.artifact-id }}
           FINAL_ARTIFACT_URL: ${{ steps.upload-trust-chain.outputs.artifact-url }}
           FINAL_ARTIFACT_DIGEST: ${{ steps.upload-trust-chain.outputs.artifact-digest }}
@@ -274,7 +293,7 @@ jobs:
             --audit artifacts/trusted-transition-ingested/final-audit.json \
             --repository "$GITHUB_REPOSITORY" \
             --source-commit "$SOURCE_SHA" \
-            --producer-run-id "$PRODUCER_RUN_ID" \
+            --producer-run-id "$GITHUB_RUN_ID" \
             --source-run-id "$SOURCE_RUN_ID" \
             --final-artifact-id "$FINAL_ARTIFACT_ID" \
             --final-artifact-url "$FINAL_ARTIFACT_URL" \
