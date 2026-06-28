@@ -1,8 +1,8 @@
 {
   "artifact_name_template": "proofqa-transition-source-{source_commit}",
-  "claim_boundary": "Exact transition-source ZIP published and re-downloaded from a public GitHub Release; not an installation, execution, physical-hardware, or human-approval claim.",
-  "destination_environment": "ibex-customer-release",
-  "destination_identity_template": "github-release:repository-id:{repository_id}:release-id:{release_id}:asset-id:{asset_id}:tag:ibex-evidence-{source_commit}",
+  "claim_boundary": "Exact public release bytes verified by an installed wheel in a fresh GitHub-hosted virtual environment; not a customer-host, long-lived service, physical-hardware, or human-approval claim.",
+  "destination_environment": "ibex-runtime-verification",
+  "destination_identity_template": "github-actions:repository-id:{repository_id}:environment:ibex-runtime-verification:workflow-run:{runtime_run_id}:attempt:{runtime_run_attempt}:runner:github-hosted-ubuntu-24.04",
   "expected_source_files": [
     "evidence/action.json",
     "evidence/intent.json",
@@ -19,8 +19,11 @@
   "promotion_workflow": ".github/workflows/ibex-evidence-promotion.yml",
   "receipt_issue": 42,
   "receipt_type": "trusted-transition-artifact-ingestion-receipt",
-  "schema_version": 4,
-  "source_workflow": ".github/workflows/github-release-production-deployment.yml",
+  "runtime_package": "ibex-agent-verification",
+  "runtime_package_version": "0.8.1",
+  "runtime_workflow": ".github/workflows/github-release-runtime-verification.yml",
+  "schema_version": 5,
+  "source_workflow": ".github/workflows/github-release-runtime-verification.yml",
   "upstream_artifact_name_template": "ibex-verilator-evidence-{source_commit}",
   "upstream_dut_commit": "022f084096baed0a9b5ebdf697ed2965f13e8ed8",
   "upstream_workflow": ".github/workflows/ibex-e2e.yml"
