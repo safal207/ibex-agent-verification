@@ -23,6 +23,10 @@ from .models import TraceValidationError
 from .silicon_gate import GateInputError, evaluate_gate
 from .timing import analyze_timing, load_timing_jsonl
 from .trace_io import load_jsonl
+from .trajectory_gate import (
+    TrajectoryGateError,
+    evaluate_trajectory_gate_file,
+)
 from .transition_phase import (
     TransitionPhaseError,
     evaluate_transition_file,
@@ -106,6 +110,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional transition verification report path",
     )
 
+    trajectory_gate = subparsers.add_parser(
+        "evaluate-trajectory-gate",
+        help="evaluate a multi-review PR state into a fail-closed transition decision",
+    )
+    trajectory_gate.add_argument(
+        "--record",
+        required=True,
+        help="normalized trajectory gate JSON record",
+    )
+    trajectory_gate.add_argument(
+        "--report",
+        help="optional trajectory gate report path",
+    )
+
     inference_evidence = subparsers.add_parser(
         "build-inference-evidence",
         help="build a verified bundle from a recorded OpenAI-compatible stream",
@@ -151,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="single-request timeout in seconds (default: 60)",
     )
     cerebras_runner.add_argument(
-        "--report", help="optional CLI report outside the evidence directory"
+        "--report", help="optional CLI report outside the Cerebras evidence directory"
     )
 
     silicon_gate = subparsers.add_parser(
@@ -241,6 +259,25 @@ def main(argv: list[str] | None = None) -> int:
                 "IN_PROGRESS": 1,
                 "RECALIBRATE": 3,
             }[payload["status"]]
+        elif args.command == "evaluate-trajectory-gate":
+            record_path = Path(args.record).resolve(strict=True)
+            if args.report:
+                report_path = Path(args.report).resolve(strict=False)
+                if report_path == record_path or (
+                    report_path.exists() and report_path.samefile(record_path)
+                ):
+                    raise TrajectoryGateError(
+                        "trajectory gate report must differ from the source record"
+                    )
+            payload = evaluate_trajectory_gate_file(record_path)
+            exit_code = {
+                "ALLOW": 0,
+                "BLOCK": 1,
+                "REPAIR": 3,
+                "SPLIT": 3,
+                "DEFER": 3,
+                "ROLLBACK": 4,
+            }[payload["decision"]]
         elif args.command == "build-inference-evidence":
             evidence_dir = Path(args.evidence_dir)
             evidence_root = evidence_dir.resolve(strict=False)
@@ -293,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
         EvidenceError,
         InferenceEvidenceError,
         TransitionPhaseError,
+        TrajectoryGateError,
         CerebrasRunnerError,
         OSError,
     ) as exc:
