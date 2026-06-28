@@ -22,6 +22,7 @@ SEVERITY_ORDER = {
     "nit": 5,
     "info": 6,
 }
+REVIEWER_ORDER = {name: index for index, name in enumerate(MANDATORY_GATES)}
 
 
 @dataclass(frozen=True)
@@ -294,10 +295,14 @@ def _agreements(findings: list[Finding]) -> list[dict[str, Any]]:
                     "path": path or None,
                     "line": line or None,
                     "blocking": blocking,
-                    "reviewers": sorted(reviewers),
+                    "reviewers": _ordered_reviewers(reviewers),
                 }
             )
     return sorted(rows, key=lambda item: (item["code"], item["path"] or "", item["line"] or 0))
+
+
+def _ordered_reviewers(reviewers: set[str]) -> list[str]:
+    return sorted(reviewers, key=lambda name: (REVIEWER_ORDER.get(name, 999), name))
 
 
 def _blind_spots(gates: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
