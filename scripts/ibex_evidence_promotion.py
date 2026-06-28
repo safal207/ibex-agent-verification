@@ -124,6 +124,12 @@ def _require_equal(actual: Any, expected: Any, *, label: str) -> None:
         )
 
 
+def _nonnegative_int(value: Any, *, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise IbexEvidencePromotionError(f"{label} must be a non-negative integer")
+    return value
+
+
 def _safe_output_directory(path: Path, *, label: str) -> Path:
     if path.is_symlink() or path.exists():
         raise IbexEvidencePromotionError(f"{label} must not already exist: {path}")
@@ -207,10 +213,7 @@ def _selection_identity(
 
 
 def _extract_archive(
-    *,
-    download_dir: Path,
-    expected_digest: str,
-    extracted_dir: Path,
+    *, download_dir: Path, expected_digest: str, extracted_dir: Path
 ) -> tuple[Path, dict[str, Any]]:
     if download_dir.is_symlink():
         raise IbexEvidencePromotionError("download directory must not be a symlink")
@@ -236,7 +239,6 @@ def _extract_archive(
         raise IbexEvidencePromotionError(
             "download and extraction directories must not contain each other"
         )
-
     extracted: list[dict[str, Any]] = []
     try:
         with zipfile.ZipFile(archive, "r") as zipped:
@@ -279,7 +281,6 @@ def _extract_archive(
                             "archive total uncompressed size exceeds limit"
                         )
                 validated.append((info, name, is_directory))
-
             for info, name, is_directory in validated:
                 destination = output / name
                 if not destination.resolve(strict=False).is_relative_to(output):
@@ -312,7 +313,6 @@ def _extract_archive(
         raise IbexEvidencePromotionError(
             f"unable to safely extract E2E artifact: {error}"
         ) from error
-
     extracted.sort(key=lambda item: item["path"])
     return output, {
         "filename": archive.name,
@@ -323,15 +323,13 @@ def _extract_archive(
 
 
 def _manifest_inventory(
-    *,
-    root: Path,
-    manifest: dict[str, Any],
-    extracted_files: set[str],
+    *, root: Path, manifest: dict[str, Any], extracted_files: set[str]
 ) -> tuple[dict[str, dict[str, Any]], int]:
     files = manifest.get("files")
     if not isinstance(files, list) or not files or len(files) > _MAX_ENTRIES:
         raise IbexEvidencePromotionError("E2E manifest files must be a non-empty array")
     inventory: dict[str, dict[str, Any]] = {}
+    folded: set[str] = set()
     total = 0
     for index, item in enumerate(files):
         if not isinstance(item, dict):
@@ -350,13 +348,13 @@ def _manifest_inventory(
             raise IbexEvidencePromotionError(
                 f"E2E manifest contains unsafe path: {path}"
             )
-        if path in inventory or path.casefold() in {
-            existing.casefold() for existing in inventory
-        }:
+        key = path.casefold()
+        if path in inventory or key in folded:
             raise IbexEvidencePromotionError(
                 f"E2E manifest contains duplicate or case-colliding path: {path}"
             )
-        size_bytes = positive_int(
+        folded.add(key)
+        size_bytes = _nonnegative_int(
             item["size_bytes"], label=f"E2E manifest files[{index}].size_bytes"
         )
         expected_digest = digest(
@@ -381,7 +379,6 @@ def _manifest_inventory(
             raise IbexEvidencePromotionError(
                 "E2E manifest total size exceeds promotion limit"
             )
-
     expected_extracted = set(inventory) | {"manifest.json"}
     if extracted_files != expected_extracted:
         raise IbexEvidencePromotionError(
@@ -441,9 +438,7 @@ def _validate_e2e_evidence(
     _require_equal(result.get("trace_parse_status"), "PARSED", label="trace parse status")
     timing_exit = result.get("timing_analyzer_exit_code")
     if isinstance(timing_exit, bool) or timing_exit not in {0, 1}:
-        raise IbexEvidencePromotionError(
-            "timing analyzer exit code must be 0 or 1"
-        )
+        raise IbexEvidencePromotionError("timing analyzer exit code must be 0 or 1")
     anomaly = result.get("timing_anomaly_detected")
     if not isinstance(anomaly, bool) or anomaly != (timing_exit == 1):
         raise IbexEvidencePromotionError(
@@ -458,11 +453,8 @@ def _validate_e2e_evidence(
         )
 
     inventory, total_size = _manifest_inventory(
-        root=root,
-        manifest=manifest,
-        extracted_files=extracted_files,
+        root=root, manifest=manifest, extracted_files=extracted_files
     )
-
     parser = load_json_object(
         root / "normalized/parser-report.json", label="Ibex parser report"
     )
@@ -491,9 +483,7 @@ def _validate_e2e_evidence(
         causal.get("timing_samples"), label="causal timing samples"
     )
     _require_equal(
-        causal.get("missing_optional_signals"),
-        [],
-        label="missing optional signals",
+        causal.get("missing_optional_signals"), [], label="missing optional signals"
     )
 
     hello_log = (root / "raw/ibex_simple_system.log").read_text(encoding="utf-8")
@@ -586,9 +576,7 @@ def _build_transition_source(
     destination_id = text(destination_id, label="destination identity", maximum=500)
 
     short = source_commit[:12]
-    release_id = (
-        f"ibex-evidence-{short}-{upstream['run_id']}-{upstream['run_attempt']}"
-    )
+    release_id = f"ibex-evidence-{short}-{upstream['run_id']}-{upstream['run_attempt']}"
     transition_id = (
         f"ibex/evidence-promotion/{short}/{promotion_run_id}/{promotion_run_attempt}"
     )
@@ -695,7 +683,6 @@ def _build_transition_source(
     }
     for relative, payload in payloads.items():
         _write_json(output / relative, payload)
-
     inventory = _source_inventory(output)
     source_set_digest = hashlib.sha256(
         json.dumps(inventory, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -751,13 +738,12 @@ def promote_ibex_evidence(
         expected_digest=upstream["artifact"]["digest"],
         extracted_dir=extracted_dir,
     )
-    extracted_files = {item["path"] for item in archive["entries"]}
     evidence = _validate_e2e_evidence(
         root=extracted_root,
         expected_repository=repo,
         expected_commit=source_sha,
         expected_ibex_ref=ibex_ref,
-        extracted_files=extracted_files,
+        extracted_files={item["path"] for item in archive["entries"]},
     )
     source = _build_transition_source(
         output_dir=output_dir,
@@ -846,10 +832,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        selection = load_json_object(args.selection, label="E2E artifact selection")
         result = promote_ibex_evidence(
             download_dir=args.download_dir,
-            selection=selection,
+            selection=load_json_object(
+                args.selection, label="E2E artifact selection"
+            ),
             extracted_dir=args.extracted_dir,
             output_dir=args.output_dir,
             repository_name=args.repository,
@@ -867,8 +854,7 @@ def main(argv: list[str] | None = None) -> int:
             destination_id=args.destination_id,
         )
         report_path = _safe_report_path(
-            args.report,
-            forbidden_roots=(args.extracted_dir, args.output_dir),
+            args.report, forbidden_roots=(args.extracted_dir, args.output_dir)
         )
         report_path.write_text(
             json.dumps(result, indent=2, sort_keys=True) + "\n",
