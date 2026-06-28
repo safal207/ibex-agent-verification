@@ -32,30 +32,7 @@ Reviewer outputs are only current if they apply to the PR head SHA.
 
 ## Minimal input
 
-```json
-{
-  "repository": "safal207/ibex-agent-verification",
-  "pr_number": 53,
-  "head_sha": "abc123",
-  "gates": {
-    "codex": {"status": "PASS", "head_sha": "abc123", "applies_to_head": true},
-    "coderabbit": {"status": "PASS", "head_sha": "abc123", "applies_to_head": true},
-    "deepseek": {
-      "status": "PASS",
-      "head_sha": "abc123",
-      "applies_to_head": true,
-      "api_review_completed": true
-    },
-    "ci": {
-      "status": "PASS",
-      "head_sha": "abc123",
-      "applies_to_head": true,
-      "exact_head": true,
-      "failed_checks": []
-    }
-  }
-}
-```
+The minimal input contains repository metadata, PR number, current head SHA, and one normalized gate object for each required perspective.
 
 ## Output
 
@@ -72,11 +49,7 @@ The output report includes:
 
 ## Determinism
 
-Findings are ordered by:
-
-```text
-severity_desc, reviewer_asc, code_asc, path_asc, line_asc
-```
+Findings are ordered by severity, reviewer, code, path, and line.
 
 Duplicate findings from multiple reviewers are normalized into one finding and surfaced as reviewer agreement.
 
@@ -85,7 +58,6 @@ Duplicate findings from multiple reviewers are normalized into one finding and s
 This MVP intentionally keeps GitHub collection and CrewAI orchestration out of the first layer. The next layer can add:
 
 - GitHub collector for PR comments, reviews, and workflow runs;
-- CLI command;
 - CrewAI perspective agents;
-- PR #53 live evaluation fixture;
-- report persistence under `evidence/trajectory-gate-report.json`.
+- PR live evaluation fixture;
+- report persistence under the evidence directory.
