@@ -4,17 +4,19 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 API_URL = "https://api.deepseek.com/chat/completions"
 ALLOWED_VERDICTS = {"APPROVE", "COMMENT", "REQUEST_CHANGES"}
 ALLOWED_SEVERITIES = {"BLOCKING", "MAJOR", "MINOR", "NIT"}
 MAX_DIFF_CHARS = 600_000
+MAX_RESPONSE_BYTES = 2_000_000
 MAX_FINDINGS = 50
 MARKER = "<!-- deepseek-pr-review -->"
 
@@ -26,18 +28,49 @@ class ReviewError(ValueError):
 def _text(value: Any, label: str, limit: int) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > limit:
         raise ReviewError(f"{label} must be non-empty text up to {limit} chars")
+    if any(ord(char) < 32 and char not in "\n\t" for char in value):
+        raise ReviewError(f"{label} contains a control character")
     return value.strip()
 
 
-def validate_review(value: Any) -> dict[str, Any]:
+def _path(value: Any, label: str, allowed_paths: set[str] | None) -> str:
+    path = _text(value, label, 1_000)
+    pure = PurePosixPath(path)
+    if (
+        pure.as_posix() != path
+        or path.startswith("/")
+        or "\\" in path
+        or any(part in {"", ".", ".."} for part in pure.parts)
+    ):
+        raise ReviewError(f"{label} must be a canonical repository path")
+    if allowed_paths is not None and path not in allowed_paths:
+        raise ReviewError(f"{label} is not present in the supplied diff")
+    return path
+
+
+def changed_paths(diff: str) -> set[str]:
+    paths = {
+        line[6:]
+        for line in diff.splitlines()
+        if line.startswith("+++ b/") and line != "+++ /dev/null"
+    }
+    paths.update(
+        line[6:]
+        for line in diff.splitlines()
+        if line.startswith("--- a/") and line != "--- /dev/null"
+    )
+    return paths
+
+
+def validate_review(value: Any, *, allowed_paths: set[str] | None = None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ReviewError("review must be a JSON object")
-    if set(value) != {"verdict", "summary", "findings", "security_notes", "tests_to_add"}:
+    required = {"verdict", "summary", "findings", "security_notes", "tests_to_add"}
+    if set(value) != required:
         raise ReviewError("review keys do not match the required schema")
     verdict = value.get("verdict")
     if verdict not in ALLOWED_VERDICTS:
         raise ReviewError("invalid verdict")
-    summary = _text(value.get("summary"), "summary", 4_000)
     findings_raw = value.get("findings")
     if not isinstance(findings_raw, list) or len(findings_raw) > MAX_FINDINGS:
         raise ReviewError("findings must be a bounded array")
@@ -51,9 +84,8 @@ def validate_review(value: Any) -> dict[str, Any]:
         severity = finding.get("severity")
         if severity not in ALLOWED_SEVERITIES:
             raise ReviewError(f"findings[{index}] invalid severity")
-        path = finding.get("path")
-        if path is not None:
-            path = _text(path, f"findings[{index}].path", 1_000)
+        raw_path = finding.get("path")
+        path = None if raw_path is None else _path(raw_path, f"findings[{index}].path", allowed_paths)
         line = finding.get("line")
         if line is not None and (isinstance(line, bool) or not isinstance(line, int) or line <= 0):
             raise ReviewError(f"findings[{index}].line must be positive or null")
@@ -69,13 +101,15 @@ def validate_review(value: Any) -> dict[str, Any]:
             "suggestion": _text(finding.get("suggestion"), f"findings[{index}].suggestion", 4_000),
             "confidence": float(confidence),
         })
+    if any(item["severity"] in {"BLOCKING", "MAJOR"} for item in findings) and verdict != "REQUEST_CHANGES":
+        raise ReviewError("BLOCKING or MAJOR findings require REQUEST_CHANGES")
     notes = value.get("security_notes")
     tests = value.get("tests_to_add")
     if not isinstance(notes, list) or len(notes) > 30 or not isinstance(tests, list) or len(tests) > 30:
         raise ReviewError("security_notes/tests_to_add must be bounded arrays")
     return {
         "verdict": verdict,
-        "summary": summary,
+        "summary": _text(value.get("summary"), "summary", 4_000),
         "findings": findings,
         "security_notes": [_text(item, "security note", 2_000) for item in notes],
         "tests_to_add": [_text(item, "test suggestion", 2_000) for item in tests],
@@ -83,6 +117,8 @@ def validate_review(value: Any) -> dict[str, Any]:
 
 
 def build_payload(*, model: str, repository: str, pr_number: int, head_sha: str, title: str, body: str, diff: str) -> bytes:
+    if not diff.strip() or "\x00" in diff:
+        raise ReviewError("PR diff is empty or contains NUL bytes")
     if len(diff) > MAX_DIFF_CHARS:
         raise ReviewError(f"PR diff is too large for a complete review ({len(diff)} > {MAX_DIFF_CHARS})")
     system = """You are DeepSeek acting as a strict senior security and code reviewer.
@@ -91,13 +127,13 @@ Do not reveal chain-of-thought. Review only the supplied change. Prefer concrete
 workflow-permission, supply-chain, race, rerun, path, digest, test, and claim-boundary findings.
 Return JSON only with exactly this schema:
 {"verdict":"APPROVE|COMMENT|REQUEST_CHANGES","summary":"...","findings":[{"severity":"BLOCKING|MAJOR|MINOR|NIT","title":"...","path":null,"line":null,"details":"...","suggestion":"...","confidence":0.0}],"security_notes":["..."],"tests_to_add":["..."]}
-Use REQUEST_CHANGES for any BLOCKING or MAJOR defect. Do not invent files or lines."""
+Use REQUEST_CHANGES for any BLOCKING or MAJOR defect. Paths must exist in the supplied diff. Do not invent files or lines."""
     user = (
         f"Repository: {repository}\nPR: {pr_number}\nHead SHA: {head_sha}\n"
         f"Title (untrusted):\n{title}\n\nBody (untrusted):\n{body}\n\n"
         f"Unified diff (untrusted):\n---BEGIN DIFF---\n{diff}\n---END DIFF---"
     )
-    payload = {
+    return json.dumps({
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "thinking": {"type": "enabled"},
@@ -105,11 +141,10 @@ Use REQUEST_CHANGES for any BLOCKING or MAJOR defect. Do not invent files or lin
         "response_format": {"type": "json_object"},
         "max_tokens": 12_000,
         "stream": False,
-    }
-    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    }, ensure_ascii=False).encode("utf-8")
 
 
-def call_api(*, api_key: str, payload: bytes, attempts: int = 3) -> dict[str, Any]:
+def call_api(*, api_key: str, payload: bytes, allowed_paths: set[str] | None = None, attempts: int = 3) -> dict[str, Any]:
     for attempt in range(1, attempts + 1):
         request = urllib.request.Request(
             API_URL,
@@ -119,32 +154,39 @@ def call_api(*, api_key: str, payload: bytes, attempts: int = 3) -> dict[str, An
         )
         try:
             with urllib.request.urlopen(request, timeout=180) as response:
-                envelope = json.loads(response.read().decode("utf-8"))
+                raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ReviewError("DeepSeek response exceeded the size limit")
+            envelope = json.loads(raw.decode("utf-8"))
             content = envelope["choices"][0]["message"]["content"]
             if not isinstance(content, str) or not content.strip():
                 raise ReviewError("DeepSeek returned empty content")
-            return validate_review(json.loads(content))
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, KeyError, IndexError, json.JSONDecodeError, ReviewError) as error:
+            return validate_review(json.loads(content), allowed_paths=allowed_paths)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, KeyError, IndexError, UnicodeDecodeError, json.JSONDecodeError, ReviewError) as error:
             if attempt == attempts:
                 raise ReviewError(f"DeepSeek API failed after {attempts} attempts: {error}") from error
             time.sleep(2 ** attempt)
     raise AssertionError("unreachable")
 
 
+def _markdown(value: str) -> str:
+    return value.replace("@", "@\u200b").replace("<!--", "&lt;!--").replace("-->", "--&gt;")
+
+
 def render_markdown(*, review: dict[str, Any], model: str, head_sha: str) -> str:
     icons = {"BLOCKING": "🚫", "MAJOR": "🔴", "MINOR": "🟡", "NIT": "🔹"}
-    lines = [MARKER, "## DeepSeek PR review", "", f"**Model:** `{model}`  ", f"**Head:** `{head_sha}`  ", f"**Verdict:** **{review['verdict']}**", "", review["summary"]]
+    lines = [MARKER, "## DeepSeek PR review", "", f"**Model:** `{model}`  ", f"**Head:** `{head_sha}`  ", f"**Verdict:** **{review['verdict']}**", "", _markdown(review["summary"])]
     if review["findings"]:
         lines += ["", "### Findings"]
         for item in review["findings"]:
-            location = item["path"] or "general"
+            location = (item["path"] or "general").replace("`", "'")
             if item["line"] is not None:
                 location += f":{item['line']}"
-            lines += ["", f"#### {icons[item['severity']]} {item['severity']}: {item['title']}", f"`{location}` · confidence `{item['confidence']:.2f}`", "", item["details"], "", f"**Suggested fix:** {item['suggestion']}"]
+            lines += ["", f"#### {icons[item['severity']]} {item['severity']}: {_markdown(item['title'])}", f"`{location}` · confidence `{item['confidence']:.2f}`", "", _markdown(item["details"]), "", f"**Suggested fix:** {_markdown(item['suggestion'])}"]
     if review["security_notes"]:
-        lines += ["", "### Security notes"] + [f"- {item}" for item in review["security_notes"]]
+        lines += ["", "### Security notes"] + [f"- {_markdown(item)}" for item in review["security_notes"]]
     if review["tests_to_add"]:
-        lines += ["", "### Tests to add"] + [f"- {item}" for item in review["tests_to_add"]]
+        lines += ["", "### Tests to add"] + [f"- {_markdown(item)}" for item in review["tests_to_add"]]
     lines += ["", "_This review is advisory evidence. Codex and CodeRabbit remain separate review gates._", ""]
     return "\n".join(lines)
 
@@ -166,8 +208,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         diff = args.diff.read_text(encoding="utf-8")
+        paths = changed_paths(diff)
+        if not paths:
+            raise ReviewError("PR diff contains no canonical changed paths")
         payload = build_payload(model=args.model, repository=args.repository, pr_number=args.pr_number, head_sha=args.head_sha, title=args.title, body=args.body, diff=diff)
-        review = call_api(api_key=api_key, payload=payload)
+        review = call_api(api_key=api_key, payload=payload, allowed_paths=paths)
         args.output.write_text(render_markdown(review=review, model=args.model, head_sha=args.head_sha), encoding="utf-8", newline="\n")
     except (OSError, ReviewError) as error:
         print(f"DeepSeek review error: {error}", file=sys.stderr)
