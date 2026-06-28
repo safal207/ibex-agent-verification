@@ -12,6 +12,10 @@ def main() -> int:
     parser.add_argument("--wheel-sha256", required=True)
     parser.add_argument("--package-version", required=True)
     parser.add_argument("--python-version", required=True)
+    parser.add_argument("--python-executable", required=True)
+    parser.add_argument("--sys-prefix", required=True)
+    parser.add_argument("--sys-base-prefix", required=True)
+    parser.add_argument("--module-file", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     payload = {
@@ -22,8 +26,11 @@ def main() -> int:
         "wheel_filename": args.wheel_filename,
         "wheel_sha256": args.wheel_sha256,
         "python_version": args.python_version,
-        "venv_active": True,
+        "python_executable": args.python_executable,
+        "sys_prefix": args.sys_prefix,
+        "sys_base_prefix": args.sys_base_prefix,
         "isolated": True,
+        "module_file": args.module_file,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
