@@ -24,9 +24,7 @@ try:
     from scripts.trusted_transition_artifact import (
         EXPECTED_SOURCE_FILES,
         TrustedTransitionArtifactError,
-        artifact_name,
-        commit,
-        digest,
+        extract_artifact,
         load_json_object,
         positive_int,
         repository,
@@ -47,9 +45,7 @@ except ImportError:
     from trusted_transition_artifact import (
         EXPECTED_SOURCE_FILES,
         TrustedTransitionArtifactError,
-        artifact_name,
-        commit,
-        digest,
+        extract_artifact,
         load_json_object,
         positive_int,
         repository,
@@ -61,10 +57,14 @@ except ImportError:
 
 
 class GitHubReleaseRuntimeError(ValueError):
-    """Raised when a released artifact was not executed under the required contract."""
+    """Raised when released bytes were not executed under the required contract."""
 
 
 _VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}(?:[A-Za-z0-9.+-]*)?$")
+_PACKAGE_NAME = "ibex-agent-verification"
+_ENTRY_POINT = "ibex-av = ibex_agent_verification.cli:main"
+_RUNTIME_ENVIRONMENT = "ibex-runtime-verification"
+_PROMOTION_ENVIRONMENT = "ibex-evidence-release"
 _CLAIM_BOUNDARY = (
     "This verified transition proves that a wheel built from the exact main-branch "
     "commit was installed without network dependency resolution into a fresh isolated "
@@ -74,9 +74,6 @@ _CLAIM_BOUNDARY = (
     "a customer-controlled host, long-lived service health, physical hardware behavior, "
     "or independent human approval, and it is not a physical production execution claim."
 )
-_RUNTIME_ENVIRONMENT = "ibex-runtime-verification"
-_PACKAGE_NAME = "ibex-agent-verification"
-_ENTRY_POINT = "ibex-av = ibex_agent_verification.cli:main"
 
 
 def _require_equal(actual: Any, expected: Any, *, label: str) -> None:
@@ -102,6 +99,23 @@ def _version(value: Any, *, label: str) -> str:
     return normalized
 
 
+def _single_file(directory: Path, *, label: str) -> Path:
+    if directory.is_symlink():
+        raise GitHubReleaseRuntimeError(f"{label} must not be a symlink")
+    root = directory.resolve(strict=True)
+    if not root.is_dir():
+        raise GitHubReleaseRuntimeError(f"{label} must be a directory")
+    entries = list(root.iterdir())
+    if len(entries) != 1:
+        raise GitHubReleaseRuntimeError(
+            f"{label} must contain exactly one file, found {len(entries)}"
+        )
+    candidate = entries[0]
+    if candidate.is_symlink() or not candidate.is_file():
+        raise GitHubReleaseRuntimeError(f"{label} entry must be a regular file")
+    return candidate
+
+
 def _runtime_identity(repository_id: int, run_id: int, run_attempt: int) -> str:
     return (
         f"github-actions:repository-id:{repository_id}:"
@@ -110,63 +124,11 @@ def _runtime_identity(repository_id: int, run_id: int, run_attempt: int) -> str:
     )
 
 
-def _validate_source_selection(
-    selection: dict[str, Any],
-    *,
-    expected_repository: str,
-    expected_repository_id: int,
-    expected_commit: str,
-    expected_workflow: str,
-    expected_run_id: int,
-    expected_run_attempt: int,
-) -> dict[str, Any]:
-    if selection.get("schema_version") != 1 or selection.get("status") != "SELECTED":
-        raise GitHubReleaseRuntimeError("source selection must be schema v1 SELECTED")
-    repo = repository(expected_repository, label="expected repository")
-    repo_id = positive_int(expected_repository_id, label="expected repository id")
-    source_commit = commit(expected_commit, label="expected source commit")
-    source_workflow = workflow(expected_workflow, label="expected source workflow")
-    run_id = positive_int(expected_run_id, label="expected source run id")
-    run_attempt = positive_int(
-        expected_run_attempt, label="expected source run attempt"
+def _promotion_identity(repository_id: int) -> str:
+    return (
+        f"github-actions:repository-id:{repository_id}:"
+        f"environment:{_PROMOTION_ENVIRONMENT}"
     )
-    expected = {
-        "repository": repo,
-        "repository_id": repo_id,
-        "head_repository_id": repo_id,
-        "run_id": run_id,
-        "run_attempt": run_attempt,
-        "workflow": source_workflow,
-        "head_branch": "main",
-        "head_sha": source_commit,
-    }
-    for key, value in expected.items():
-        _require_equal(selection.get(key), value, label=f"source selection {key}")
-    artifact = selection.get("artifact")
-    if not isinstance(artifact, dict):
-        raise GitHubReleaseRuntimeError("source selection lacks artifact metadata")
-    expected_name = f"proofqa-transition-source-{source_commit}"
-    _require_equal(
-        artifact_name(artifact.get("name"), label="source artifact name"),
-        expected_name,
-        label="source artifact name",
-    )
-    return {
-        "repository": repo,
-        "repository_id": repo_id,
-        "source_commit": source_commit,
-        "source_workflow": source_workflow,
-        "run_id": run_id,
-        "run_attempt": run_attempt,
-        "artifact": {
-            "id": positive_int(artifact.get("id"), label="source artifact id"),
-            "name": expected_name,
-            "size_bytes": positive_int(
-                artifact.get("size_bytes"), label="source artifact size"
-            ),
-            "digest": digest(artifact.get("digest"), label="source artifact digest"),
-        },
-    }
 
 
 def inspect_wheel(
@@ -187,8 +149,8 @@ def inspect_wheel(
     try:
         with zipfile.ZipFile(wheel_path, "r") as archive:
             names = archive.namelist()
-            if len(names) > 500:
-                raise GitHubReleaseRuntimeError("wheel contains too many entries")
+            if not names or len(names) > 500:
+                raise GitHubReleaseRuntimeError("wheel entry count is unsafe")
             if any(
                 name.startswith("/")
                 or "\\" in name
@@ -222,9 +184,9 @@ def inspect_wheel(
             entry_points.read_string(
                 archive.read(entry_point_names[0]).decode("utf-8")
             )
-            if not entry_points.has_section("console_scripts"):
-                raise GitHubReleaseRuntimeError("wheel lacks console_scripts")
-            actual_entry = entry_points.get("console_scripts", "ibex-av", fallback=None)
+            actual_entry = entry_points.get(
+                "console_scripts", "ibex-av", fallback=None
+            )
             _require_equal(
                 f"ibex-av = {actual_entry}" if actual_entry else None,
                 _ENTRY_POINT,
@@ -286,7 +248,7 @@ def validate_install_report(
         label="installed wheel filename",
     )
     _require_equal(
-        digest(report.get("wheel_sha256"), label="installed wheel digest"),
+        report.get("wheel_sha256"),
         expected_wheel["sha256"],
         label="installed wheel digest",
     )
@@ -364,6 +326,7 @@ def validate_runtime_manifest(
         raise GitHubReleaseRuntimeError("runtime manifest file count mismatch")
     root = runtime_bundle_dir.resolve(strict=True)
     inventory: dict[str, dict[str, Any]] = {}
+    folded: set[str] = set()
     for index, item in enumerate(files):
         if not isinstance(item, dict):
             raise GitHubReleaseRuntimeError(
@@ -378,24 +341,27 @@ def validate_runtime_manifest(
         pure = PurePosixPath(path)
         if pure.as_posix() != path or any(part in {"", ".", ".."} for part in pure.parts):
             raise GitHubReleaseRuntimeError(f"runtime manifest path is unsafe: {path}")
-        if path in inventory:
-            raise GitHubReleaseRuntimeError(f"runtime manifest duplicates path: {path}")
+        key = path.casefold()
+        if path in inventory or key in folded:
+            raise GitHubReleaseRuntimeError(
+                f"runtime manifest duplicates or case-collides path: {path}"
+            )
+        folded.add(key)
         size_bytes = item.get("size_bytes")
         if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes < 0:
             raise GitHubReleaseRuntimeError(f"runtime manifest size is invalid: {path}")
-        expected_sha = digest(
-            f"sha256:{item.get('sha256')}", label=f"runtime manifest digest for {path}"
-        )
+        raw_sha = item.get("sha256")
+        if not isinstance(raw_sha, str) or re.fullmatch(r"[0-9a-f]{64}", raw_sha) is None:
+            raise GitHubReleaseRuntimeError(f"runtime manifest digest is invalid: {path}")
         candidate = root.joinpath(*pure.parts)
         if candidate.is_symlink() or not candidate.is_file():
             raise GitHubReleaseRuntimeError(f"runtime manifest path is not regular: {path}")
         _require_equal(candidate.stat().st_size, size_bytes, label=f"runtime file size {path}")
-        actual_sha = f"sha256:{sha256_file(candidate)}"
-        _require_equal(actual_sha, expected_sha, label=f"runtime file digest {path}")
+        _require_equal(sha256_file(candidate), raw_sha, label=f"runtime file digest {path}")
         inventory[path] = {
             "path": path,
             "size_bytes": size_bytes,
-            "sha256": expected_sha.removeprefix("sha256:"),
+            "sha256": raw_sha,
         }
     if set(inventory) != EXPECTED_SOURCE_FILES:
         raise GitHubReleaseRuntimeError(
@@ -404,7 +370,7 @@ def validate_runtime_manifest(
     actual_files = {
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
-        if path.is_file() and path.name != "manifest.json"
+        if path.is_file() and path.resolve() != (root / "manifest.json").resolve()
     }
     if actual_files != EXPECTED_SOURCE_FILES:
         raise GitHubReleaseRuntimeError(
@@ -415,6 +381,129 @@ def validate_runtime_manifest(
         "files_checked": len(inventory),
         "manifest_sha256": sha256_file(root / "manifest.json"),
         "files": [inventory[path] for path in sorted(inventory)],
+    }
+
+
+def extract_live_release(
+    *,
+    release: dict[str, Any],
+    release_download_dir: Path,
+    output_dir: Path,
+    expected_repository: str,
+    expected_repository_id: int,
+    expected_commit: str,
+    expected_release_tag: str,
+    expected_asset_name: str,
+) -> dict[str, Any]:
+    downloaded_asset = _single_file(
+        release_download_dir, label="live release download directory"
+    )
+    observation = observe_release(
+        release=release,
+        expected_repository=expected_repository,
+        expected_repository_id=expected_repository_id,
+        expected_commit=expected_commit,
+        expected_tag=expected_release_tag,
+        expected_asset_name=expected_asset_name,
+        downloaded_asset=downloaded_asset,
+    )
+    live_digest = observation["asset"]["downloaded_digest"]
+    if live_digest is None:
+        raise GitHubReleaseRuntimeError("live release download lacks a SHA-256 digest")
+    synthetic_selection = {
+        "schema_version": 1,
+        "status": "SELECTED",
+        "repository": observation["repository"],
+        "head_sha": observation["source_commit"],
+        "artifact": {
+            "id": observation["asset"]["id"],
+            "name": observation["asset"]["name"],
+            "size_bytes": observation["asset"]["size_bytes"],
+            "digest": live_digest,
+        },
+    }
+    extraction = extract_artifact(
+        download_dir=release_download_dir,
+        selection=synthetic_selection,
+        output_dir=output_dir,
+    )
+    return {
+        "schema_version": 1,
+        "kind": "github-release-runtime-input",
+        "status": "EXTRACTED",
+        "observation": observation,
+        "extraction": extraction,
+    }
+
+
+def _validate_promoted_release_source(
+    *,
+    source_dir: Path,
+    release_observation: dict[str, Any],
+    expected_repository: str,
+    expected_repository_id: int,
+    expected_commit: str,
+    expected_promotion_workflow: str,
+) -> dict[str, Any]:
+    provenance = load_json_object(
+        source_dir / "source-provenance.json", label="released source provenance"
+    )
+    deployment = provenance.get("deployment")
+    if not isinstance(deployment, dict):
+        raise GitHubReleaseRuntimeError("released source lacks deployment metadata")
+    promotion_workflow = workflow(
+        expected_promotion_workflow, label="expected promotion workflow"
+    )
+    _require_equal(
+        deployment.get("workflow"), promotion_workflow, label="released source workflow"
+    )
+    promotion_run_id = positive_int(
+        deployment.get("run_id"), label="released source promotion run id"
+    )
+    promotion_run_attempt = positive_int(
+        deployment.get("run_attempt"), label="released source promotion run attempt"
+    )
+    destination = provenance.get("destination")
+    if not isinstance(destination, dict):
+        raise GitHubReleaseRuntimeError("released source lacks destination metadata")
+    _require_equal(
+        destination.get("environment"),
+        _PROMOTION_ENVIRONMENT,
+        label="released source environment",
+    )
+    _require_equal(
+        destination.get("identity"),
+        _promotion_identity(expected_repository_id),
+        label="released source destination identity",
+    )
+    validation = validate_production_transition_source(
+        source_dir=source_dir,
+        expected_repository=expected_repository,
+        expected_commit=expected_commit,
+        expected_workflow=promotion_workflow,
+        expected_run_id=promotion_run_id,
+        expected_run_attempt=promotion_run_attempt,
+        expected_event="workflow_run",
+        expected_branch="main",
+        expected_environment=_PROMOTION_ENVIRONMENT,
+        expected_destination_id=_promotion_identity(expected_repository_id),
+    )
+    _require_equal(
+        release_observation["repository"],
+        expected_repository,
+        label="live release repository",
+    )
+    _require_equal(
+        release_observation["source_commit"],
+        expected_commit,
+        label="live release commit",
+    )
+    return {
+        "status": validation["status"],
+        "promotion_workflow": promotion_workflow,
+        "promotion_run_id": promotion_run_id,
+        "promotion_run_attempt": promotion_run_attempt,
+        "source_set_digest": validation["source_set_digest"],
     }
 
 
@@ -496,8 +585,8 @@ def _build_transition_source(
         "destination": destination,
     }
     checks = [
-        f"public GitHub Release {release['id']} asset {asset['id']} was observed for the exact commit",
-        "live release asset SHA-256 matched the selected production source artifact",
+        f"public GitHub Release {release['id']} asset {asset['id']} was downloaded for the exact commit",
+        f"live release asset SHA-256 {subject_digest} was verified before extraction",
         f"wheel {wheel['filename']} matched package {wheel['package_name']} version {wheel['package_version']}",
         f"wheel SHA-256 {wheel['sha256']} was recorded before installation",
         "wheel metadata preserved the ibex-av console entry point and Python >=3.11 contract",
@@ -600,8 +689,8 @@ def _build_transition_source(
 def build_runtime_source(
     *,
     source_dir: Path,
-    source_selection: dict[str, Any],
     release: dict[str, Any],
+    release_download_dir: Path,
     runtime_bundle_dir: Path,
     runtime_manifest: dict[str, Any],
     wheel_path: Path,
@@ -611,9 +700,7 @@ def build_runtime_source(
     expected_repository: str,
     expected_repository_id: int,
     expected_commit: str,
-    expected_source_workflow: str,
-    expected_source_run_id: int,
-    expected_source_run_attempt: int,
+    expected_promotion_workflow: str,
     expected_release_tag: str,
     expected_asset_name: str,
     expected_package_version: str,
@@ -621,51 +708,30 @@ def build_runtime_source(
     runtime_run_id: int,
     runtime_run_attempt: int,
 ) -> dict[str, Any]:
-    selection = _validate_source_selection(
-        source_selection,
-        expected_repository=expected_repository,
-        expected_repository_id=expected_repository_id,
-        expected_commit=expected_commit,
-        expected_workflow=expected_source_workflow,
-        expected_run_id=expected_source_run_id,
-        expected_run_attempt=expected_source_run_attempt,
+    repo = repository(expected_repository, label="expected repository")
+    repo_id = positive_int(expected_repository_id, label="expected repository id")
+    source_commit = text(expected_commit, label="expected commit", maximum=40)
+    if re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
+        raise GitHubReleaseRuntimeError("expected commit must be 40 lowercase hex")
+    downloaded_asset = _single_file(
+        release_download_dir, label="live release download directory"
     )
-    production_provenance = load_json_object(
-        source_dir / "source-provenance.json", label="production source provenance"
-    )
-    production_destination = production_provenance.get("destination")
-    if not isinstance(production_destination, dict):
-        raise GitHubReleaseRuntimeError("production source lacks destination metadata")
     release_observation = observe_release(
         release=release,
-        expected_repository=selection["repository"],
-        expected_repository_id=selection["repository_id"],
-        expected_commit=selection["source_commit"],
+        expected_repository=repo,
+        expected_repository_id=repo_id,
+        expected_commit=source_commit,
         expected_tag=expected_release_tag,
         expected_asset_name=expected_asset_name,
-        expected_asset_digest=selection["artifact"]["digest"],
+        downloaded_asset=downloaded_asset,
     )
-    _require_equal(
-        production_destination.get("environment"),
-        "ibex-customer-release",
-        label="production source environment",
-    )
-    _require_equal(
-        production_destination.get("identity"),
-        release_observation["destination_id"],
-        label="production source/live release identity",
-    )
-    production_validation = validate_production_transition_source(
+    promotion = _validate_promoted_release_source(
         source_dir=source_dir,
-        expected_repository=selection["repository"],
-        expected_commit=selection["source_commit"],
-        expected_workflow=selection["source_workflow"],
-        expected_run_id=selection["run_id"],
-        expected_run_attempt=selection["run_attempt"],
-        expected_event="workflow_run",
-        expected_branch="main",
-        expected_environment="ibex-customer-release",
-        expected_destination_id=release_observation["destination_id"],
+        release_observation=release_observation,
+        expected_repository=repo,
+        expected_repository_id=repo_id,
+        expected_commit=source_commit,
+        expected_promotion_workflow=expected_promotion_workflow,
     )
     package_version = _version(
         expected_package_version, label="expected package version"
@@ -687,12 +753,12 @@ def build_runtime_source(
     )
     runtime_source = _build_transition_source(
         output_dir=output_dir,
-        repository_name=selection["repository"],
-        source_commit=selection["source_commit"],
+        repository_name=repo,
+        source_commit=source_commit,
         runtime_workflow=runtime_workflow,
         runtime_run_id=runtime_run_id,
         runtime_run_attempt=runtime_run_attempt,
-        repository_id=selection["repository_id"],
+        repository_id=repo_id,
         release_observation=release_observation,
         wheel=wheel,
         install=install,
@@ -703,15 +769,11 @@ def build_runtime_source(
         "schema_version": 1,
         "kind": "github-release-runtime-source-build",
         "status": "EXECUTED",
-        "repository": selection["repository"],
-        "source_commit": selection["source_commit"],
+        "repository": repo,
+        "source_commit": source_commit,
         "input": {
-            "source_workflow": selection["source_workflow"],
-            "source_run_id": selection["run_id"],
-            "source_run_attempt": selection["run_attempt"],
-            "source_artifact": selection["artifact"],
-            "production_validation": production_validation["status"],
             "release": release_observation,
+            "promotion": promotion,
         },
         "runtime": {
             "wheel": wheel,
@@ -746,7 +808,9 @@ def observe_runtime_source(
 ) -> dict[str, Any]:
     repo = repository(expected_repository, label="expected repository")
     repo_id = positive_int(expected_repository_id, label="expected repository id")
-    source_commit = commit(expected_commit, label="expected commit")
+    source_commit = text(expected_commit, label="expected commit", maximum=40)
+    if re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
+        raise GitHubReleaseRuntimeError("expected commit must be 40 lowercase hex")
     runtime_workflow = workflow(
         expected_runtime_workflow, label="expected runtime workflow"
     )
@@ -835,14 +899,25 @@ def append_outputs(path: Path, observation: dict[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Build or independently observe GitHub Release runtime evidence"
+        description="Extract, build, or independently observe release runtime evidence"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    extract = subparsers.add_parser("extract")
+    extract.add_argument("--release-api-json", type=Path, required=True)
+    extract.add_argument("--release-download-dir", type=Path, required=True)
+    extract.add_argument("--output-dir", type=Path, required=True)
+    extract.add_argument("--expected-repository", required=True)
+    extract.add_argument("--expected-repository-id", type=int, required=True)
+    extract.add_argument("--expected-commit", required=True)
+    extract.add_argument("--expected-release-tag", required=True)
+    extract.add_argument("--expected-asset-name", required=True)
+    extract.add_argument("--report", type=Path, required=True)
+
     build = subparsers.add_parser("build")
     build.add_argument("--source-dir", type=Path, required=True)
-    build.add_argument("--source-selection", type=Path, required=True)
     build.add_argument("--release-api-json", type=Path, required=True)
+    build.add_argument("--release-download-dir", type=Path, required=True)
     build.add_argument("--runtime-bundle-dir", type=Path, required=True)
     build.add_argument("--runtime-manifest", type=Path, required=True)
     build.add_argument("--wheel", type=Path, required=True)
@@ -852,9 +927,7 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--expected-repository", required=True)
     build.add_argument("--expected-repository-id", type=int, required=True)
     build.add_argument("--expected-commit", required=True)
-    build.add_argument("--expected-source-workflow", required=True)
-    build.add_argument("--expected-source-run-id", type=int, required=True)
-    build.add_argument("--expected-source-run-attempt", type=int, required=True)
+    build.add_argument("--expected-promotion-workflow", required=True)
     build.add_argument("--expected-release-tag", required=True)
     build.add_argument("--expected-asset-name", required=True)
     build.add_argument("--expected-package-version", required=True)
@@ -882,15 +955,24 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "build":
+        release = load_json_object(args.release_api_json, label="GitHub release API response")
+        if args.command == "extract":
+            result = extract_live_release(
+                release=release,
+                release_download_dir=args.release_download_dir,
+                output_dir=args.output_dir,
+                expected_repository=args.expected_repository,
+                expected_repository_id=args.expected_repository_id,
+                expected_commit=args.expected_commit,
+                expected_release_tag=args.expected_release_tag,
+                expected_asset_name=args.expected_asset_name,
+            )
+            write_json(args.report, result, forbidden_root=args.output_dir)
+        elif args.command == "build":
             result = build_runtime_source(
                 source_dir=args.source_dir,
-                source_selection=load_json_object(
-                    args.source_selection, label="runtime source selection"
-                ),
-                release=load_json_object(
-                    args.release_api_json, label="GitHub release API response"
-                ),
+                release=release,
+                release_download_dir=args.release_download_dir,
                 runtime_bundle_dir=args.runtime_bundle_dir,
                 runtime_manifest=load_json_object(
                     args.runtime_manifest, label="runtime manifest"
@@ -906,9 +988,7 @@ def main(argv: list[str] | None = None) -> int:
                 expected_repository=args.expected_repository,
                 expected_repository_id=args.expected_repository_id,
                 expected_commit=args.expected_commit,
-                expected_source_workflow=args.expected_source_workflow,
-                expected_source_run_id=args.expected_source_run_id,
-                expected_source_run_attempt=args.expected_source_run_attempt,
+                expected_promotion_workflow=args.expected_promotion_workflow,
                 expected_release_tag=args.expected_release_tag,
                 expected_asset_name=args.expected_asset_name,
                 expected_package_version=args.expected_package_version,
@@ -922,9 +1002,7 @@ def main(argv: list[str] | None = None) -> int:
                 provenance=load_json_object(
                     args.source_provenance, label="runtime source provenance"
                 ),
-                release=load_json_object(
-                    args.release_api_json, label="GitHub release API response"
-                ),
+                release=release,
                 expected_repository=args.expected_repository,
                 expected_repository_id=args.expected_repository_id,
                 expected_commit=args.expected_commit,
