@@ -49,7 +49,7 @@ class Finding:
                 raw.get("message") or raw.get("reason") or "unspecified finding"
             ),
             path=str(raw.get("path") or ""),
-            line=int(raw.get("line") or 0),
+            line=_coerce_line(reviewer, raw.get("line")),
             blocking=bool(raw.get("blocking", default_blocking)),
         )
 
@@ -152,7 +152,7 @@ def _normalize_gate(
     name: str, gate: dict[str, Any], head_sha: str
 ) -> tuple[dict[str, Any], list[Finding], list[str]]:
     status = str(gate.get("status") or "MISSING").upper()
-    applies_to_head = bool(gate.get("applies_to_head", gate.get("head_sha") == head_sha))
+    applies_to_head = _applies_to_head(gate, head_sha)
     reason = str(gate.get("reason") or "")
     actions: list[str] = []
     findings = _findings(name, gate)
@@ -218,6 +218,13 @@ def _normalize_gate(
         normalized["exact_head"] = bool(gate.get("exact_head", applies_to_head))
         normalized["failed_checks"] = gate.get("failed_checks") or []
     return normalized, findings, actions
+
+
+def _applies_to_head(gate: dict[str, Any], head_sha: str) -> bool:
+    gate_head = gate.get("head_sha")
+    if gate_head is not None:
+        return gate_head == head_sha
+    return gate.get("applies_to_head") is True
 
 
 def _findings(name: str, gate: dict[str, Any]) -> list[Finding]:
@@ -325,6 +332,15 @@ def _trajectory_effect(decision: str) -> str:
         "SPLIT": "Reduces transition scope to recover reviewability",
         "ROLLBACK": "Rejects the current transition until a safer path is established",
     }[decision]
+
+
+def _coerce_line(reviewer: str, value: Any) -> int:
+    if value in (None, ""):
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise TrajectoryGateError(f"{reviewer} finding line must be an integer") from exc
 
 
 def _required_str(record: dict[str, Any], key: str) -> str:
