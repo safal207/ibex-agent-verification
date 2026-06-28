@@ -13,7 +13,15 @@ class TrajectoryGateError(ValueError):
 
 MANDATORY_GATES = ("codex", "coderabbit", "deepseek", "ci")
 DECISIONS = ("ALLOW", "BLOCK", "REPAIR", "SPLIT", "DEFER", "ROLLBACK")
-SEVERITY_ORDER = {"critical": 0, "high": 1, "major": 2, "medium": 3, "minor": 4, "nit": 5, "info": 6}
+SEVERITY_ORDER = {
+    "critical": 0,
+    "high": 1,
+    "major": 2,
+    "medium": 3,
+    "minor": 4,
+    "nit": 5,
+    "info": 6,
+}
 
 
 @dataclass(frozen=True)
@@ -27,21 +35,31 @@ class Finding:
     blocking: bool = True
 
     @classmethod
-    def from_raw(cls, reviewer: str, raw: dict[str, Any], default_blocking: bool) -> "Finding":
+    def from_raw(
+        cls, reviewer: str, raw: dict[str, Any], default_blocking: bool
+    ) -> "Finding":
         if not isinstance(raw, dict):
             raise TrajectoryGateError(f"{reviewer} finding must be an object")
         return cls(
             reviewer=reviewer,
             severity=str(raw.get("severity") or "major").lower(),
             code=str(raw.get("code") or "UNSPECIFIED"),
-            message=str(raw.get("message") or raw.get("reason") or "unspecified finding"),
+            message=str(
+                raw.get("message") or raw.get("reason") or "unspecified finding"
+            ),
             path=str(raw.get("path") or ""),
             line=int(raw.get("line") or 0),
             blocking=bool(raw.get("blocking", default_blocking)),
         )
 
     def order_key(self) -> tuple[int, str, str, str, int]:
-        return (SEVERITY_ORDER.get(self.severity, 99), self.reviewer, self.code, self.path, self.line)
+        return (
+            SEVERITY_ORDER.get(self.severity, 99),
+            self.reviewer,
+            self.code,
+            self.path,
+            self.line,
+        )
 
     def dedupe_key(self) -> tuple[str, str, str, int, bool]:
         return (self.code, self.message, self.path, self.line, self.blocking)
@@ -76,12 +94,15 @@ def evaluate_trajectory_gate(record: dict[str, Any]) -> dict[str, Any]:
     next_actions: list[str] = []
 
     for gate_name in MANDATORY_GATES:
-        gate = gates.get(gate_name) or {"status": "MISSING", "reason": "mandatory gate is absent"}
+        gate = gates.get(gate_name) or {
+            "status": "MISSING",
+            "reason": "mandatory gate is absent",
+        }
         if not isinstance(gate, dict):
             raise TrajectoryGateError(f"gates.{gate_name} must be an object")
-        normalized, findings, actions = _normalize_gate(gate_name, gate, head_sha)
+        normalized, gate_findings, actions = _normalize_gate(gate_name, gate, head_sha)
         normalized_gates[gate_name] = normalized
-        all_findings.extend(findings)
+        all_findings.extend(gate_findings)
         next_actions.extend(actions)
 
     findings = _dedupe_findings(all_findings)
@@ -97,19 +118,23 @@ def evaluate_trajectory_gate(record: dict[str, Any]) -> dict[str, Any]:
         "observed_at": str(record.get("observed_at") or _utc_now()),
         "decision": decision,
         "best_next_transition": {"type": decision, "reason": reason},
-        "candidate_transitions": _candidate_transitions(decision, reason, normalized_gates),
+        "candidate_transitions": _candidate_transitions(
+            decision, reason, normalized_gates
+        ),
         "gates": normalized_gates,
         "blocking_findings": [item.to_dict() for item in blocking_findings],
         "non_blocking_findings": [item.to_dict() for item in non_blocking_findings],
         "synthesis": {
-            "agreements": _agreements(findings),
+            "agreements": _agreements(all_findings),
             "disagreements": [],
             "blind_spots": _blind_spots(normalized_gates),
             "trajectory_effect": _trajectory_effect(decision),
             "finding_order": "severity_desc, reviewer_asc, code_asc, path_asc, line_asc",
         },
         "required_next_actions": sorted({action for action in next_actions if action}),
-        "gate_statuses": {name: gate["status"] for name, gate in normalized_gates.items()},
+        "gate_statuses": {
+            name: gate["status"] for name, gate in normalized_gates.items()
+        },
     }
 
 
@@ -122,7 +147,9 @@ def evaluate_trajectory_gate_file(path: str | Path) -> dict[str, Any]:
     return evaluate_trajectory_gate(payload)
 
 
-def _normalize_gate(name: str, gate: dict[str, Any], head_sha: str) -> tuple[dict[str, Any], list[Finding], list[str]]:
+def _normalize_gate(
+    name: str, gate: dict[str, Any], head_sha: str
+) -> tuple[dict[str, Any], list[Finding], list[str]]:
     status = str(gate.get("status") or "MISSING").upper()
     applies_to_head = bool(gate.get("applies_to_head", gate.get("head_sha") == head_sha))
     reason = str(gate.get("reason") or "")
@@ -180,7 +207,9 @@ def _normalize_gate(name: str, gate: dict[str, Any], head_sha: str) -> tuple[dic
         "head_sha": gate.get("head_sha"),
         "reason": reason or None,
         "blocking_findings": [item.to_dict() for item in findings if item.blocking],
-        "non_blocking_findings": [item.to_dict() for item in findings if not item.blocking],
+        "non_blocking_findings": [
+            item.to_dict() for item in findings if not item.blocking
+        ],
     }
     if name == "deepseek":
         normalized["api_review_completed"] = bool(gate.get("api_review_completed", False))
@@ -206,7 +235,9 @@ def _dedupe_findings(findings: list[Finding]) -> list[Finding]:
     return sorted(grouped.values(), key=lambda value: value.order_key())
 
 
-def _select_decision(gates: dict[str, dict[str, Any]], blocking_findings: list[Finding]) -> tuple[str, str]:
+def _select_decision(
+    gates: dict[str, dict[str, Any]], blocking_findings: list[Finding]
+) -> tuple[str, str]:
     if any(gate["status"] == "FAILED" for gate in gates.values()):
         return "REPAIR", "At least one exact-head execution gate failed"
     if any(gate["status"] == "BLOCKED" for gate in gates.values()):
@@ -220,16 +251,31 @@ def _select_decision(gates: dict[str, dict[str, Any]], blocking_findings: list[F
     return "BLOCK", "No safe transition could be proven from the available evidence"
 
 
-def _candidate_transitions(selected: str, reason: str, gates: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _candidate_transitions(
+    selected: str, reason: str, gates: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
     unresolved = [name for name, gate in gates.items() if gate["status"] != "PASS"]
     rows = []
     for decision in DECISIONS:
         if decision == selected:
             rows.append({"type": decision, "status": "SELECTED", "reason": reason})
         elif decision == "ALLOW" and unresolved:
-            rows.append({"type": decision, "status": "REJECTED", "reason": "mandatory gates are not all PASS", "blocking_gates": unresolved})
+            rows.append(
+                {
+                    "type": decision,
+                    "status": "REJECTED",
+                    "reason": "mandatory gates are not all PASS",
+                    "blocking_gates": unresolved,
+                }
+            )
         else:
-            rows.append({"type": decision, "status": "REJECTED", "reason": f"{selected} is safer for the current evidence state"})
+            rows.append(
+                {
+                    "type": decision,
+                    "status": "REJECTED",
+                    "reason": f"{selected} is safer for the current evidence state",
+                }
+            )
     return rows
 
 
@@ -241,13 +287,25 @@ def _agreements(findings: list[Finding]) -> list[dict[str, Any]]:
     for key, reviewers in grouped.items():
         if len(reviewers) > 1:
             code, message, path, line, blocking = key
-            rows.append({"code": code, "message": message, "path": path or None, "line": line or None, "blocking": blocking, "reviewers": sorted(reviewers)})
+            rows.append(
+                {
+                    "code": code,
+                    "message": message,
+                    "path": path or None,
+                    "line": line or None,
+                    "blocking": blocking,
+                    "reviewers": sorted(reviewers),
+                }
+            )
     return sorted(rows, key=lambda item: (item["code"], item["path"] or "", item["line"] or 0))
 
 
 def _blind_spots(gates: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     return [
-        {"gate": name, "reason": gate.get("reason") or "gate did not provide usable evidence"}
+        {
+            "gate": name,
+            "reason": gate.get("reason") or "gate did not provide usable evidence",
+        }
         for name, gate in sorted(gates.items())
         if gate["status"] != "PASS"
     ]
