@@ -17,6 +17,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def sha256_file(path: Path) -> str:
+    """Return the lowercase SHA-256 digest of one regular file."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -25,8 +26,11 @@ def sha256_file(path: Path) -> str:
 
 
 def parse_key_value_file(path: Path) -> dict[str, str]:
+    """Parse a strict unique-key ``key=value`` metadata file."""
     values: dict[str, str] = {}
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
         if not line.strip():
             continue
         if "=" not in line:
@@ -42,6 +46,7 @@ def parse_key_value_file(path: Path) -> dict[str, str]:
 
 
 def collect_files(evidence_dir: Path, output: Path) -> list[dict[str, Any]]:
+    """Collect deterministic manifest entries, excluding the manifest output."""
     files: list[dict[str, Any]] = []
     output_resolved = output.resolve()
     for path in sorted(evidence_dir.rglob("*")):
@@ -69,6 +74,7 @@ def build_manifest(
     tool_versions_file: Path,
     commands_file: Path,
 ) -> dict[str, Any]:
+    """Build the deterministic Ibex execution manifest payload."""
     if not evidence_dir.is_dir():
         raise EvidenceError(f"evidence directory does not exist: {evidence_dir}")
     if not tool_versions_file.is_file():
@@ -106,6 +112,7 @@ def build_manifest(
 
 
 def write_manifest(**kwargs: Any) -> dict[str, Any]:
+    """Build and persist an Ibex evidence manifest."""
     output = Path(kwargs["output"])
     manifest = build_manifest(**kwargs)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -157,12 +164,27 @@ def _manifest_non_negative_int(value: Any, *, field: str) -> int:
     return value
 
 
+def _source_set_digest(entries: list[dict[str, Any]]) -> str:
+    canonical = [
+        {
+            "path": entry["path"],
+            "size_bytes": entry["size_bytes"],
+            "sha256": entry["sha256"],
+        }
+        for entry in sorted(entries, key=lambda item: item["path"])
+    ]
+    return hashlib.sha256(
+        json.dumps(canonical, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
 def verify_manifest(*, evidence_dir: Path, manifest_path: Path) -> dict[str, Any]:
     """Verify that a bundle exactly matches its manifest inventory.
 
     The manifest itself is intentionally excluded because it cannot contain a stable
     hash of itself. Every other regular file must be listed exactly once. Symlinks and
-    paths that escape the evidence root are rejected rather than followed.
+    paths that escape the evidence root are rejected rather than followed. The report
+    binds both the manifest bytes and the canonical source inventory.
     """
 
     try:
@@ -186,6 +208,7 @@ def verify_manifest(*, evidence_dir: Path, manifest_path: Path) -> dict[str, Any
     payload = _load_manifest(manifest)
     entries = payload["files"]
     listed: set[str] = set()
+    normalized_entries: list[dict[str, Any]] = []
     mismatches: list[dict[str, Any]] = []
 
     for index, entry in enumerate(entries):
@@ -205,6 +228,13 @@ def verify_manifest(*, evidence_dir: Path, manifest_path: Path) -> dict[str, Any
             raise EvidenceError(
                 f"manifest files[{index}].sha256 must be 64 lowercase hexadecimal characters"
             )
+        normalized_entries.append(
+            {
+                "path": relative_text,
+                "size_bytes": expected_size,
+                "sha256": expected_sha,
+            }
+        )
 
         candidate = root.joinpath(*relative.parts)
         if candidate == manifest:
@@ -257,43 +287,6 @@ def verify_manifest(*, evidence_dir: Path, manifest_path: Path) -> dict[str, Any
         "schema_version": payload["schema_version"],
         "files_checked": len(entries),
         "mismatches": mismatches,
+        "manifest_sha256": f"sha256:{sha256_file(manifest)}",
+        "source_set_digest": f"sha256:{_source_set_digest(normalized_entries)}",
     }
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Build an Ibex evidence manifest")
-    parser.add_argument("--evidence-dir", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--project-sha", required=True)
-    parser.add_argument("--ibex-requested-ref", required=True)
-    parser.add_argument("--ibex-resolved-sha", required=True)
-    parser.add_argument("--ibex-config", required=True)
-    parser.add_argument("--timing-exit-code", type=int, required=True)
-    parser.add_argument("--tool-versions-file", type=Path, required=True)
-    parser.add_argument("--commands-file", type=Path, required=True)
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    try:
-        manifest = write_manifest(
-            evidence_dir=args.evidence_dir,
-            output=args.output,
-            project_sha=args.project_sha,
-            ibex_requested_ref=args.ibex_requested_ref,
-            ibex_resolved_sha=args.ibex_resolved_sha,
-            ibex_config=args.ibex_config,
-            timing_exit_code=args.timing_exit_code,
-            tool_versions_file=args.tool_versions_file,
-            commands_file=args.commands_file,
-        )
-    except (EvidenceError, OSError) as exc:
-        print(json.dumps({"status": "INVALID_EVIDENCE", "error": str(exc)}, indent=2))
-        return 2
-    print(json.dumps({"status": "MANIFEST_WRITTEN", "files": len(manifest["files"])}, indent=2))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
