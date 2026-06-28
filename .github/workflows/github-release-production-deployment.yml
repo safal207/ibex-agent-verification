@@ -235,6 +235,13 @@ jobs:
             --deployment-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --report artifacts/github-release-production-reports/production-source-build.json \
             --github-output "$GITHUB_OUTPUT"
+      - name: Validate exact customer deployment transition source
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          DESTINATION_ID: ${{ steps.production-source.outputs.destination-id }}
+        run: |
+          set -euo pipefail
+          test -n "$DESTINATION_ID"
           python scripts/production_transition_source.py \
             --source-dir artifacts/github-release-production-source \
             --expected-repository "$GITHUB_REPOSITORY" \
@@ -245,7 +252,7 @@ jobs:
             --expected-event workflow_run \
             --expected-branch main \
             --expected-environment ibex-customer-release \
-            --expected-destination-id "${{ steps.production-source.outputs.destination-id }}" \
+            --expected-destination-id "$DESTINATION_ID" \
             --report artifacts/github-release-production-reports/production-source-validation.json
       - name: Upload exact customer deployment transition source
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
