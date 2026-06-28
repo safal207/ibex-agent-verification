@@ -49,27 +49,20 @@ def _path(value: Any, label: str, allowed_paths: set[str] | None) -> str:
 
 
 def changed_paths(diff: str) -> set[str]:
-    """Return canonical repository paths from normal, rename-only, and binary diffs."""
+    """Return canonical repository paths from trusted git diff metadata headers."""
     paths: set[str] = set()
     for line in diff.splitlines():
-        if line.startswith("diff --git "):
-            try:
-                parts = shlex.split(line)
-            except ValueError as error:
-                raise ReviewError(f"invalid diff --git header: {error}") from error
-            if len(parts) != 4 or parts[:2] != ["diff", "--git"]:
-                raise ReviewError("invalid diff --git header")
-            for value, prefix in ((parts[2], "a/"), (parts[3], "b/")):
-                if value != "/dev/null" and value.startswith(prefix):
-                    paths.add(value[len(prefix) :])
-        elif line.startswith("+++ b/"):
-            paths.add(line[6:])
-        elif line.startswith("--- a/"):
-            paths.add(line[6:])
-        elif line.startswith("rename from "):
-            paths.add(line[len("rename from ") :])
-        elif line.startswith("rename to "):
-            paths.add(line[len("rename to ") :])
+        if not line.startswith("diff --git "):
+            continue
+        try:
+            parts = shlex.split(line)
+        except ValueError as error:
+            raise ReviewError(f"invalid diff --git header: {error}") from error
+        if len(parts) != 4 or parts[:2] != ["diff", "--git"]:
+            raise ReviewError("invalid diff --git header")
+        for value, prefix in ((parts[2], "a/"), (parts[3], "b/")):
+            if value != "/dev/null" and value.startswith(prefix):
+                paths.add(value[len(prefix) :])
     normalized: set[str] = set()
     for path in paths:
         pure = PurePosixPath(path)
