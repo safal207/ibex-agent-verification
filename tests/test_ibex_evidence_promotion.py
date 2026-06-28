@@ -11,6 +11,7 @@ from scripts.ibex_evidence_promotion import (
     promote_ibex_evidence,
 )
 from scripts.production_transition_source import validate_production_transition_source
+from scripts.trusted_transition_artifact import TrustedTransitionArtifactError
 
 
 REPOSITORY = "safal207/ibex-agent-verification"
@@ -221,7 +222,10 @@ class IbexEvidencePromotionTests(unittest.TestCase):
             self.assertEqual(result["upstream"]["files_verified"], 16)
             self.assertEqual(result["observation"]["simulation_exit_code"], 0)
             self.assertEqual(result["observation"]["trace_parse_status"], "PARSED")
-            self.assertEqual(result["release"]["subject_digest"], result["upstream"]["artifact"]["digest"])
+            self.assertEqual(
+                result["release"]["subject_digest"],
+                result["upstream"]["artifact"]["digest"],
+            )
             self.assertIn(
                 "not a production deployment claim",
                 result["claim_boundary"],
