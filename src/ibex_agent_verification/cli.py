@@ -169,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="single-request timeout in seconds (default: 60)",
     )
     cerebras_runner.add_argument(
-        "--report", help="optional CLI report outside the Cerebras evidence directory"
+        "--report", help="optional CLI report outside the evidence directory"
     )
 
     silicon_gate = subparsers.add_parser(
