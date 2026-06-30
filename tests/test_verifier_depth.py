@@ -297,7 +297,7 @@ def test_oversized_evidence_array_fails_before_sorting() -> None:
         _verdict("D2", evidence_refs=refs),
     )
     _assert_invalid(result)
-    assert result["errors"]["a"] == "EVIDENCE_REF_COUNT_EXCEEDED"
+    assert result["errors"]["a"] == ["EVIDENCE_REF_COUNT_EXCEEDED"]
 
 
 def test_missing_crosswalk_authority_fields_fail_closed() -> None:
