@@ -33,6 +33,8 @@ def sha256_jcs(value: Any) -> str:
 
 
 def _serialize(value: Any) -> str:
+    """Serialize one supported Python value into canonical JSON text."""
+
     if value is None:
         return "null"
     if value is True:
@@ -69,6 +71,8 @@ def _serialize(value: Any) -> str:
 
 
 def _quote(value: str) -> str:
+    """Quote one validated string using compact JSON escaping rules."""
+
     _reject_surrogates(value)
     return json.dumps(
         value,
@@ -85,5 +89,7 @@ def _utf16_sort_key(value: str) -> bytes:
 
 
 def _reject_surrogates(value: str) -> None:
+    """Reject lone UTF-16 surrogate code points that violate I-JSON."""
+
     if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
         raise CanonicalizationError("lone UTF-16 surrogate is not valid I-JSON")
