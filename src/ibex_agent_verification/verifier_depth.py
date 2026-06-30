@@ -5,7 +5,10 @@ import json
 from enum import IntEnum
 from typing import Any, Mapping
 
-from ibex_agent_verification.schema_validation import validate_guardrail_decision
+from ibex_agent_verification.schema_validation import (
+    load_guardrail_decision_schema,
+    validate_guardrail_decision,
+)
 
 
 class VerifierDepth(IntEnum):
@@ -26,10 +29,6 @@ REQUIRED_DEPTH: dict[str, VerifierDepth] = {
     "PUBLIC_CONFORMANCE": VerifierDepth.D3,
     "EXTERNAL_CERTIFICATION": VerifierDepth.D3,
 }
-
-MAX_EVIDENCE_REFS = 32
-MAX_EVIDENCE_REF_CHARS = 500
-MAX_EVIDENCE_AGGREGATE_BYTES = 2048
 
 
 def _parse_depth(value: Any) -> VerifierDepth | None:
@@ -127,21 +126,45 @@ def continuation_matches(
     return canonical_action_id(resumed_envelope) == frozen_action_id
 
 
+def evidence_resource_limits() -> dict[str, int]:
+    """Return crosswalk resource limits from the executable schema metadata."""
+
+    schema = load_guardrail_decision_schema()
+    evidence_schema = schema["properties"]["evidence_refs"]
+    item_schema = evidence_schema["items"]
+    limits = {
+        "max_refs": evidence_schema["maxItems"],
+        "max_ref_chars": item_schema["maxLength"],
+        "max_aggregate_bytes": evidence_schema["x-maxAggregateUtf8Bytes"],
+    }
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value <= 0
+        for value in limits.values()
+    ):
+        raise ValueError("invalid evidence resource-limit metadata")
+    return limits
+
+
 def _evidence_resource_error(verdict: Mapping[str, Any]) -> str | None:
     refs = verdict.get("evidence_refs")
     if not isinstance(refs, list):
         return None
-    if len(refs) > MAX_EVIDENCE_REFS:
+    try:
+        limits = evidence_resource_limits()
+    except (KeyError, TypeError, ValueError):
+        return "EVIDENCE_LIMIT_PROFILE_INVALID"
+
+    if len(refs) > limits["max_refs"]:
         return "EVIDENCE_REF_COUNT_EXCEEDED"
 
     aggregate_bytes = 0
     for ref in refs:
         if not isinstance(ref, str):
             continue
-        if len(ref) > MAX_EVIDENCE_REF_CHARS:
+        if len(ref) > limits["max_ref_chars"]:
             return "EVIDENCE_REF_LENGTH_EXCEEDED"
         aggregate_bytes += len(ref.encode("utf-8"))
-        if aggregate_bytes > MAX_EVIDENCE_AGGREGATE_BYTES:
+        if aggregate_bytes > limits["max_aggregate_bytes"]:
             return "EVIDENCE_REF_BYTES_EXCEEDED"
     return None
 
