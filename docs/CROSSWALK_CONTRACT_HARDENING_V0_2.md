@@ -52,7 +52,7 @@ Runtime resource bounds are applied before allocation-heavy normalization:
 
 - no more than 32 evidence references;
 - no reference longer than 500 characters;
-- no more than 4096 aggregate UTF-8 bytes;
+- no more than 2048 aggregate UTF-8 bytes;
 - duplicate references are rejected.
 
 ## Crosswalk profile
