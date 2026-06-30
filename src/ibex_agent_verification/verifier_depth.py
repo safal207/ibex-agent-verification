@@ -5,6 +5,8 @@ import json
 from enum import IntEnum
 from typing import Any, Mapping
 
+from ibex_agent_verification.schema_validation import validate_guardrail_decision
+
 
 class VerifierDepth(IntEnum):
     """Independent recomputability level for a guardrail verdict."""
@@ -24,6 +26,10 @@ REQUIRED_DEPTH: dict[str, VerifierDepth] = {
     "PUBLIC_CONFORMANCE": VerifierDepth.D3,
     "EXTERNAL_CERTIFICATION": VerifierDepth.D3,
 }
+
+MAX_EVIDENCE_REFS = 32
+MAX_EVIDENCE_REF_CHARS = 500
+MAX_EVIDENCE_AGGREGATE_BYTES = 4096
 
 
 def _parse_depth(value: Any) -> VerifierDepth | None:
@@ -121,21 +127,36 @@ def continuation_matches(
     return canonical_action_id(resumed_envelope) == frozen_action_id
 
 
-def _evidence_key(verdict: Mapping[str, Any]) -> tuple[str, ...] | None:
-    """Return an order-independent key for schema-valid evidence references.
-
-    ``evidence_refs`` is comparable only when it is a non-empty array of unique,
-    non-empty strings, matching the GuardrailDecision schema. Any invalid shape
-    fails closed by returning ``None``.
-    """
-
+def _evidence_resource_error(verdict: Mapping[str, Any]) -> str | None:
     refs = verdict.get("evidence_refs")
-    if not isinstance(refs, list) or not refs:
+    if not isinstance(refs, list):
         return None
-    if any(not isinstance(ref, str) or not ref for ref in refs):
-        return None
-    if len(set(refs)) != len(refs):
-        return None
+    if len(refs) > MAX_EVIDENCE_REFS:
+        return "EVIDENCE_REF_COUNT_EXCEEDED"
+
+    aggregate_bytes = 0
+    for ref in refs:
+        if not isinstance(ref, str):
+            continue
+        if len(ref) > MAX_EVIDENCE_REF_CHARS:
+            return "EVIDENCE_REF_LENGTH_EXCEEDED"
+        aggregate_bytes += len(ref.encode("utf-8"))
+        if aggregate_bytes > MAX_EVIDENCE_AGGREGATE_BYTES:
+            return "EVIDENCE_REF_BYTES_EXCEEDED"
+    return None
+
+
+def _crosswalk_profile_errors(verdict: Mapping[str, Any]) -> tuple[str, ...]:
+    errors: list[str] = []
+    for field in ("claim_ceiling", "permitted_next_transition"):
+        value = verdict.get(field)
+        if not isinstance(value, str) or not value:
+            errors.append(f"$.{field}: crosswalk requires a non-empty string")
+    return tuple(errors)
+
+
+def _evidence_key(verdict: Mapping[str, Any]) -> tuple[str, ...]:
+    refs = verdict["evidence_refs"]
     return tuple(sorted(refs))
 
 
@@ -143,27 +164,58 @@ def validate_crosswalk(
     verdict_a: Mapping[str, Any],
     verdict_b: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Compare authority semantics rather than vocabulary labels."""
+    """Compare complete transition semantics rather than vocabulary labels."""
+
+    resource_errors = {
+        side: error
+        for side, error in (
+            ("a", _evidence_resource_error(verdict_a)),
+            ("b", _evidence_resource_error(verdict_b)),
+        )
+        if error is not None
+    }
+    if resource_errors:
+        return {
+            "status": "INCOMPARABLE",
+            "reason": "INVALID_VERDICT_SHAPE",
+            "invalid_sides": sorted(resource_errors),
+            "errors": resource_errors,
+        }
+
+    schema_errors = {
+        "a": validate_guardrail_decision(verdict_a)
+        + _crosswalk_profile_errors(verdict_a),
+        "b": validate_guardrail_decision(verdict_b)
+        + _crosswalk_profile_errors(verdict_b),
+    }
+    invalid = {side: errors for side, errors in schema_errors.items() if errors}
+    if invalid:
+        return {
+            "status": "INCOMPARABLE",
+            "reason": "INVALID_VERDICT_SHAPE",
+            "invalid_sides": sorted(invalid),
+            "errors": {side: list(errors) for side, errors in invalid.items()},
+        }
 
     evidence_a = _evidence_key(verdict_a)
     evidence_b = _evidence_key(verdict_b)
-    # Fail closed: comparable only when both verdicts bind the SAME evidence.
-    # Missing, invalid, or mismatched evidence is incomparable.
-    if evidence_a is None or evidence_b is None or evidence_a != evidence_b:
+    if evidence_a != evidence_b:
         return {
             "status": "INCOMPARABLE",
             "reason": "EVIDENCE_MISMATCH",
         }
 
     fields = (
+        "decision",
         "allowed_runtime_use",
         "claim_ceiling",
         "permitted_next_transition",
+        "trust_domain",
     )
 
     def normalize(field: str, verdict: Mapping[str, Any]) -> Any:
-        value = verdict.get(field)
-        if field == "allowed_runtime_use" and isinstance(value, list):
+        value = verdict[field]
+        if field == "allowed_runtime_use":
             return tuple(sorted(value))
         return value
 
@@ -175,12 +227,12 @@ def validate_crosswalk(
     if mismatches:
         return {
             "status": "COLLISION",
-            "reason": "AUTHORITY_TUPLE_MISMATCH",
+            "reason": "TRANSITION_SEMANTICS_MISMATCH",
             "mismatches": mismatches,
         }
 
     return {
         "status": "VALID",
-        "reason": "TRANSITION_AUTHORITY_PRESERVED",
+        "reason": "TRANSITION_SEMANTICS_PRESERVED",
         "labels": [verdict_a.get("label"), verdict_b.get("label")],
     }
