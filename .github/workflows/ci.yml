@@ -20,4 +20,32 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -e .
       - run: python -m unittest discover -s tests -v
+      - name: Verify installed wheel schema
+        if: matrix.python-version == '3.11'
+        run: |
+          python -m pip wheel . --no-deps --wheel-dir dist
+          python -m venv /tmp/ibex-wheel-check
+          /tmp/ibex-wheel-check/bin/python -m pip install --no-deps dist/*.whl
+          cd /tmp
+          /tmp/ibex-wheel-check/bin/python - <<'PY'
+          from ibex_agent_verification.schema_validation import validate_guardrail_decision
+
+          evidence = "sha256:" + "a" * 64
+          decision = {
+              "schema_version": 1,
+              "decision_id": "gd_wheel_001",
+              "tool_call_id": "tc_wheel_001",
+              "decision": "REPAIR",
+              "reason_code": "WHEEL_SMOKE_TEST",
+              "policy_version": "policy-v1",
+              "verifier_depth": "D2",
+              "allowed_runtime_use": ["STRUCTURED_REPLAN"],
+              "trust_domain": "tenant:wheel",
+              "claim_ceiling": "bounded-third-party-reproducible",
+              "permitted_next_transition": "REPLAN_WITHIN_TRUST_DOMAIN",
+              "evidence_refs": [evidence],
+              "issued_at": "2026-06-30T12:00:00Z",
+          }
+          assert validate_guardrail_decision(decision) == ()
+          PY
       - run: ./scripts/run_fixture_demo.sh
