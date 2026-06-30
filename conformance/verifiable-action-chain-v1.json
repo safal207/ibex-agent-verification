@@ -1,0 +1,60 @@
+{
+  "profile": "verifiable-action-chain-v1",
+  "action": {
+    "preimage": {
+      "tool_identity": "send_email",
+      "args_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "caller_identity": "agent:qa",
+      "resource_scope": "workspace:demo",
+      "policy_version": "policy-v1"
+    },
+    "canonical_utf8": "{\"args_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"caller_identity\":\"agent:qa\",\"policy_version\":\"policy-v1\",\"resource_scope\":\"workspace:demo\",\"tool_identity\":\"send_email\"}",
+    "id": "sha256:5efc8759c0a4fb5ab9b33a1a0d8b9ca69d123eaac8d6c643e7a271906ce1b11d"
+  },
+  "decision": {
+    "source_record": {
+      "schema_version": 1,
+      "decision_id": "placeholder",
+      "tool_call_id": "tc-1",
+      "label": "test",
+      "decision": "REPAIR",
+      "reason_code": "TEST",
+      "policy_version": "policy-v1",
+      "verifier_depth": "D2",
+      "allowed_runtime_use": [
+        "STRUCTURED_REPLAN",
+        "AUDIT_LOG"
+      ],
+      "trust_domain": "tenant:demo",
+      "claim_ceiling": "bounded",
+      "permitted_next_transition": "REPLAN",
+      "evidence_refs": [
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      ],
+      "issued_at": "2026-06-30T12:00:00Z"
+    },
+    "canonical_preimage_utf8": "{\"action_id\":\"sha256:5efc8759c0a4fb5ab9b33a1a0d8b9ca69d123eaac8d6c643e7a271906ce1b11d\",\"allowed_runtime_use\":[\"AUDIT_LOG\",\"STRUCTURED_REPLAN\"],\"claim_ceiling\":\"bounded\",\"decision\":\"REPAIR\",\"evidence_refs\":[\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"],\"issued_at\":\"2026-06-30T12:00:00Z\",\"permitted_next_transition\":\"REPLAN\",\"policy_version\":\"policy-v1\",\"reason_code\":\"TEST\",\"schema_version\":1,\"trust_domain\":\"tenant:demo\",\"verifier_depth\":\"D2\"}",
+    "id": "sha256:dd65275734398c467b676534392ff5ec9fd55326f8bba0e3aeb95e9b5c0497b7"
+  },
+  "execution_outcome": {
+    "payload": {
+      "status": "executed",
+      "tool_call_id": "tc-1"
+    },
+    "payload_canonical_utf8": "{\"status\":\"executed\",\"tool_call_id\":\"tc-1\"}",
+    "payload_ref": "sha256:4ca8bb33610696437c3fe6610f5348ad15327cfbee9ad6b266bbf9536182751e",
+    "link_canonical_utf8": "{\"payload_ref\":\"sha256:4ca8bb33610696437c3fe6610f5348ad15327cfbee9ad6b266bbf9536182751e\",\"record_type\":\"execution_outcome\",\"upstream_id\":\"sha256:dd65275734398c467b676534392ff5ec9fd55326f8bba0e3aeb95e9b5c0497b7\"}",
+    "id": "sha256:9a2a16d687fbad33b654c8a53e5fdee1caee29828f23bec1c8161424706c6c19"
+  },
+  "audit_record": {
+    "payload": {
+      "actor": "runtime:demo",
+      "result": "recorded"
+    },
+    "payload_canonical_utf8": "{\"actor\":\"runtime:demo\",\"result\":\"recorded\"}",
+    "payload_ref": "sha256:9a9dcc27df4a066d869dcaee2702cb03a54500831bab57de492dafbdca72d7c0",
+    "link_canonical_utf8": "{\"payload_ref\":\"sha256:9a9dcc27df4a066d869dcaee2702cb03a54500831bab57de492dafbdca72d7c0\",\"record_type\":\"audit_record\",\"upstream_id\":\"sha256:9a2a16d687fbad33b654c8a53e5fdee1caee29828f23bec1c8161424706c6c19\"}",
+    "id": "sha256:4a0b755083544c5d26602e42d6eb548ed2c08034755598a703d3b74e98fe8879"
+  }
+}
