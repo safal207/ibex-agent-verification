@@ -12,7 +12,8 @@ action_envelope
 action_id ───────────────┐
                          │ canonical_decision_id()
 evidence_refs ───────────┤
-authority fields ────────┘
+bound authority ─────────┤
+bound audit facts ───────┘
                          ↓
                     decision_id
                          ↓
@@ -23,10 +24,16 @@ authority fields ────────┘
 
 `evidence_refs` are **not** part of `action_id`. They first enter the canonical
 preimage at the `decision_id` stage, where they are bound together with the
-frozen action identifier and the decision authority surface.
+frozen action identifier and the classified decision surface.
 
 Every downstream record **MUST** bind to the identifier of the exact upstream
 record it consumes.
+
+## Security boundary
+
+This chain provides content integrity and deterministic linkage. It does not by
+itself provide issuer authentication, freshness, or replay protection. Those
+properties require a later signature and replay-policy layer.
 
 ## Canonicalization profile
 
@@ -36,6 +43,7 @@ Canonicalization Scheme (JCS) profile:
 - object keys are ordered by UTF-16 code units;
 - strings are serialized as JSON and encoded as UTF-8;
 - arrays preserve order unless the contract explicitly defines them as sets;
+- semantic sets are ordered by unsigned UTF-8 bytes before JCS serialization;
 - booleans and `null` use their JSON spellings;
 - integers are limited to the interoperable IEEE-754 safe range;
 - floating-point values, lone UTF-16 surrogates, non-string object keys, and
@@ -82,41 +90,71 @@ Resume invariant:
 
 ## Decision identifier
 
-`decision_id` binds the action identifier, evidence, and decision authority
-surface:
+A decision record **MUST** pass the executable GuardrailDecision JSON Schema
+before an identifier is issued. The hashing profile is stricter than merely
+selecting a convenient subset of known fields.
+
+Every schema property belongs to exactly one classification:
+
+### Bound authority
 
 ```text
-action_id
 schema_version
 decision
-reason_code
 policy_version
 verifier_depth
 allowed_runtime_use
 trust_domain
 claim_ceiling
 permitted_next_transition
-evidence_refs
-issued_at
-expires_at (optional)
+retry_policy
+suggested_replan_constraint
+required_remediation
+recompute_mode
+continuation_id
+action_id
 ```
 
-`allowed_runtime_use` and `evidence_refs` are semantic sets and are sorted
-before canonicalization. Duplicates fail closed.
+### Bound audit facts
+
+```text
+reason_code
+failure_class
+violated_boundary
+severity
+evidence_refs
+issued_at
+expires_at
+```
+
+### Explicitly excluded from `decision_id`
+
+```text
+decision_id              # self-reference
+tool_call_id             # local transport correlation
+label                    # human-facing metadata
+estimated_cost_avoided   # non-authority business metric
+cost_of_delay            # non-authority business metric
+```
+
+The schema-parity test fails if a future schema property is unclassified or
+classified more than once. This prevents silent authority drift.
+
+`allowed_runtime_use` and `evidence_refs` are semantic sets. They are sorted by
+unsigned UTF-8 byte order before canonicalization, and duplicates fail closed.
 
 The identifier is:
 
 ```text
 decision_id = SHA-256(JCS({
   action_id,
-  evidence_refs,
-  authority fields...
+  bound authority fields...,
+  bound audit fields...
 }))
 ```
 
-Human-facing labels and local `tool_call_id` values are deliberately excluded
-from the authority digest. The executable schema remains responsible for the
-complete decision-record shape.
+Optional bound fields are included when present. Therefore absent and explicit
+`null` values are distinct preimages unless a future profile says otherwise.
 
 ## Outcome and audit links
 
@@ -149,9 +187,24 @@ decision_id
 without requiring a shared database. Each verifier can independently
 recompute the same identifiers from the same canonical bytes.
 
-## Conformance vector
+## Published conformance vector
 
-Action envelope:
+The complete machine-readable vector is published at:
+
+```text
+conformance/verifiable-action-chain-v1.json
+```
+
+It includes:
+
+```text
+action preimage + canonical bytes + action_id
+decision source record + canonical preimage bytes + decision_id
+execution payload + payload_ref + link bytes + execution_outcome_id
+audit payload + payload_ref + link bytes + audit_record_id
+```
+
+The action portion begins with:
 
 ```json
 {
@@ -163,17 +216,19 @@ Action envelope:
 }
 ```
 
-Canonical UTF-8 JSON:
+Its canonical UTF-8 JSON is:
 
 ```json
 {"args_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","caller_identity":"agent:qa","policy_version":"policy-v1","resource_scope":"workspace:demo","tool_identity":"send_email"}
 ```
 
-Expected identifier:
+Expected action identifier:
 
 ```text
 sha256:5efc8759c0a4fb5ab9b33a1a0d8b9ca69d123eaac8d6c643e7a271906ce1b11d
 ```
+
+The test suite recomputes every stage of the published chain byte-for-byte.
 
 ## Adapter policy boundary
 
@@ -214,8 +269,8 @@ cross-builder identifier equality: unclaimed
 ```
 
 Compatibility becomes demonstrated only when every builder consumes the exact
-same published preimage — identical field names, values, value types, and
-optional-field rules — and reproduces the same canonical bytes and digest.
-This contract's locked action-envelope field set is the candidate convergence
-surface; external systems remain non-conformant until they pass its vectors
-byte-for-byte.
+same published preimage — identical field names, values, value types, set-order
+rules, and optional-field rules — and reproduces the same canonical bytes and
+digest. This contract's locked action-envelope field set and full-chain vector
+are the candidate convergence surface; external systems remain non-conformant
+until they pass those vectors byte-for-byte.
