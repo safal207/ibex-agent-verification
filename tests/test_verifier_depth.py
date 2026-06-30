@@ -30,7 +30,7 @@ def _envelope(**overrides: str) -> dict[str, str]:
 def _verdict(label: str, **overrides: object) -> dict[str, object]:
     verdict: dict[str, object] = {
         "label": label,
-        "evidence_digest": "sha256:evidence",
+        "evidence_refs": ["sha256:evidence"],
         "allowed_runtime_use": ["STRUCTURED_REPLAN"],
         "claim_ceiling": "bounded-third-party-reproducible",
         "permitted_next_transition": "REPLAN_WITHIN_TRUST_DOMAIN",
@@ -158,9 +158,58 @@ def test_same_label_with_different_authority_fails_closed() -> None:
 def test_crosswalk_with_different_evidence_is_incomparable() -> None:
     result = validate_crosswalk(
         _verdict("D2"),
-        _verdict("bounded@anchor", evidence_digest="sha256:other"),
+        _verdict("bounded@anchor", evidence_refs=["sha256:other"]),
     )
     assert result == {
         "status": "INCOMPARABLE",
         "reason": "EVIDENCE_MISMATCH",
     }
+
+
+def test_crosswalk_evidence_refs_order_independent() -> None:
+    a = _verdict("D2", evidence_refs=["sha256:a", "sha256:b"])
+    b = _verdict("D3", evidence_refs=["sha256:b", "sha256:a"])
+    assert validate_crosswalk(a, b)["status"] == "VALID"
+
+
+def test_crosswalk_missing_evidence_fails_closed() -> None:
+    no_evidence = _verdict("D2")
+    no_evidence.pop("evidence_refs")
+    result = validate_crosswalk(no_evidence, _verdict("D2"))
+    assert result == {"status": "INCOMPARABLE", "reason": "EVIDENCE_MISMATCH"}
+
+
+def test_crosswalk_empty_evidence_fails_closed() -> None:
+    result = validate_crosswalk(
+        _verdict("D2", evidence_refs=[]),
+        _verdict("D2"),
+    )
+    assert result == {"status": "INCOMPARABLE", "reason": "EVIDENCE_MISMATCH"}
+
+
+def test_crosswalk_non_string_evidence_ref_fails_closed() -> None:
+    result = validate_crosswalk(
+        _verdict("D2", evidence_refs=["sha256:a", 7]),
+        _verdict("D2", evidence_refs=["sha256:a", "7"]),
+    )
+    assert result == {"status": "INCOMPARABLE", "reason": "EVIDENCE_MISMATCH"}
+
+
+def test_crosswalk_duplicate_evidence_refs_fail_closed() -> None:
+    result = validate_crosswalk(
+        _verdict("D2", evidence_refs=["sha256:a", "sha256:a"]),
+        _verdict("D2", evidence_refs=["sha256:a"]),
+    )
+    assert result == {"status": "INCOMPARABLE", "reason": "EVIDENCE_MISMATCH"}
+
+
+def test_crosswalk_empty_string_evidence_ref_fails_closed() -> None:
+    result = validate_crosswalk(
+        _verdict("D2", evidence_refs=[""]),
+        _verdict("D2", evidence_refs=[""]),
+    )
+    assert result == {"status": "INCOMPARABLE", "reason": "EVIDENCE_MISMATCH"}
+
+
+def test_crosswalk_same_evidence_same_authority_is_valid() -> None:
+    assert validate_crosswalk(_verdict("terminal"), _verdict("D3"))["status"] == "VALID"

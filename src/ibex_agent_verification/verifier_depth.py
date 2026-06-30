@@ -121,13 +121,35 @@ def continuation_matches(
     return canonical_action_id(resumed_envelope) == frozen_action_id
 
 
+def _evidence_key(verdict: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """Return an order-independent key for schema-valid evidence references.
+
+    ``evidence_refs`` is comparable only when it is a non-empty array of unique,
+    non-empty strings, matching the GuardrailDecision schema. Any invalid shape
+    fails closed by returning ``None``.
+    """
+
+    refs = verdict.get("evidence_refs")
+    if not isinstance(refs, list) or not refs:
+        return None
+    if any(not isinstance(ref, str) or not ref for ref in refs):
+        return None
+    if len(set(refs)) != len(refs):
+        return None
+    return tuple(sorted(refs))
+
+
 def validate_crosswalk(
     verdict_a: Mapping[str, Any],
     verdict_b: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Compare authority semantics rather than vocabulary labels."""
 
-    if verdict_a.get("evidence_digest") != verdict_b.get("evidence_digest"):
+    evidence_a = _evidence_key(verdict_a)
+    evidence_b = _evidence_key(verdict_b)
+    # Fail closed: comparable only when both verdicts bind the SAME evidence.
+    # Missing, invalid, or mismatched evidence is incomparable.
+    if evidence_a is None or evidence_b is None or evidence_a != evidence_b:
         return {
             "status": "INCOMPARABLE",
             "reason": "EVIDENCE_MISMATCH",
