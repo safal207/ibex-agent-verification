@@ -28,5 +28,5 @@ def test_aggregate_evidence_bytes_fail_before_normalization() -> None:
 
     assert result["status"] == "INCOMPARABLE"
     assert result["reason"] == "INVALID_VERDICT_SHAPE"
-    assert result["errors"]["a"] == "EVIDENCE_REF_BYTES_EXCEEDED"
-    assert result["errors"]["b"] == "EVIDENCE_REF_BYTES_EXCEEDED"
+    assert result["errors"]["a"] == ["EVIDENCE_REF_BYTES_EXCEEDED"]
+    assert result["errors"]["b"] == ["EVIDENCE_REF_BYTES_EXCEEDED"]
