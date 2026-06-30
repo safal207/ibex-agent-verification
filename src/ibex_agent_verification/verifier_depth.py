@@ -29,7 +29,7 @@ REQUIRED_DEPTH: dict[str, VerifierDepth] = {
 
 MAX_EVIDENCE_REFS = 32
 MAX_EVIDENCE_REF_CHARS = 500
-MAX_EVIDENCE_AGGREGATE_BYTES = 4096
+MAX_EVIDENCE_AGGREGATE_BYTES = 2048
 
 
 def _parse_depth(value: Any) -> VerifierDepth | None:
