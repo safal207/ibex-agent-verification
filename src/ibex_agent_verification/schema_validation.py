@@ -1,3 +1,5 @@
+"""Dependency-free validation helpers for the packaged guardrail schema."""
+
 from __future__ import annotations
 
 import json
@@ -10,7 +12,7 @@ from typing import Any, Mapping
 
 @lru_cache(maxsize=1)
 def load_guardrail_decision_schema() -> dict[str, Any]:
-    """Load the packaged GuardrailDecision schema used by the runtime gate."""
+    """Load and cache the packaged GuardrailDecision JSON Schema."""
 
     schema_path = files("ibex_agent_verification").joinpath(
         "schemas/guardrail-decision.schema.json"
@@ -19,7 +21,7 @@ def load_guardrail_decision_schema() -> dict[str, Any]:
 
 
 def validate_guardrail_decision(instance: Mapping[str, Any]) -> tuple[str, ...]:
-    """Validate one decision against the packaged normative JSON Schema."""
+    """Return deterministic validation errors for one guardrail decision."""
 
     if not isinstance(instance, Mapping):
         return ("$: expected object",)
@@ -29,6 +31,8 @@ def validate_guardrail_decision(instance: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _validate(value: Any, schema: Mapping[str, Any], path: str, errors: list[str]) -> None:
+    """Recursively apply the schema keywords used by the guardrail contract."""
+
     for sub_schema in schema.get("allOf", []):
         _validate(value, sub_schema, path, errors)
 
@@ -112,6 +116,8 @@ def _validate(value: Any, schema: Mapping[str, Any], path: str, errors: list[str
 
 
 def _json_equal(left: Any, right: Any) -> bool:
+    """Compare values using JSON type identity instead of Python coercion."""
+
     if isinstance(left, bool) or isinstance(right, bool):
         return isinstance(left, bool) and isinstance(right, bool) and left == right
     if _is_number(left) and _is_number(right):
@@ -134,6 +140,8 @@ def _json_equal(left: Any, right: Any) -> bool:
 
 
 def _matches_type(value: Any, declared: str) -> bool:
+    """Return whether a Python value matches one JSON Schema type name."""
+
     if declared == "null":
         return value is None
     if declared == "object":
@@ -152,10 +160,14 @@ def _matches_type(value: Any, declared: str) -> bool:
 
 
 def _is_number(value: Any) -> bool:
+    """Return whether a value is a JSON number rather than a boolean."""
+
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _is_datetime(value: str) -> bool:
+    """Return whether a string is a timezone-aware ISO-8601 date-time."""
+
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
