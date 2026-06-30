@@ -6,6 +6,7 @@ import re
 from typing import Any, Mapping
 
 from ibex_agent_verification.canonical_json import CanonicalizationError, sha256_jcs
+from ibex_agent_verification.schema_validation import validate_guardrail_decision
 
 ACTION_ENVELOPE_REQUIRED_FIELDS = (
     "tool_identity",
@@ -28,7 +29,43 @@ DECISION_BINDING_REQUIRED_FIELDS = (
     "evidence_refs",
     "issued_at",
 )
-DECISION_BINDING_OPTIONAL_FIELDS = ("expires_at",)
+DECISION_BOUND_AUTHORITY_FIELDS = (
+    "schema_version",
+    "decision",
+    "policy_version",
+    "verifier_depth",
+    "allowed_runtime_use",
+    "trust_domain",
+    "claim_ceiling",
+    "permitted_next_transition",
+    "retry_policy",
+    "suggested_replan_constraint",
+    "required_remediation",
+    "recompute_mode",
+    "continuation_id",
+    "action_id",
+)
+DECISION_BOUND_AUDIT_FIELDS = (
+    "reason_code",
+    "failure_class",
+    "violated_boundary",
+    "severity",
+    "evidence_refs",
+    "issued_at",
+    "expires_at",
+)
+DECISION_EXPLICITLY_EXCLUDED_FIELDS = (
+    "decision_id",
+    "tool_call_id",
+    "label",
+    "estimated_cost_avoided",
+    "cost_of_delay",
+)
+DECISION_CLASSIFIED_FIELDS = (
+    *DECISION_BOUND_AUTHORITY_FIELDS,
+    *DECISION_BOUND_AUDIT_FIELDS,
+    *DECISION_EXPLICITLY_EXCLUDED_FIELDS,
+)
 _SHA256_REF = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -52,29 +89,30 @@ def canonical_decision_id(
     action_id: str,
     decision: Mapping[str, Any],
 ) -> str:
-    """Bind evidence and decision authority to one frozen action."""
+    """Bind validated evidence, audit facts, and authority to one frozen action."""
 
     _require_sha256_ref(action_id, "action_id")
-    projection = _exact_projection(
+    _validate_decision_record(decision)
+    optional_fields = tuple(
+        field
+        for field in DECISION_CLASSIFIED_FIELDS
+        if field not in DECISION_BINDING_REQUIRED_FIELDS
+    )
+    record = _exact_projection(
         decision,
         required=DECISION_BINDING_REQUIRED_FIELDS,
-        optional=(
-            *DECISION_BINDING_OPTIONAL_FIELDS,
-            "action_id",
-            "decision_id",
-            "label",
-            "tool_call_id",
-        ),
+        optional=optional_fields,
         record_name="guardrail decision",
-        reject_unknown=False,
     )
-    existing_action_id = projection.get("action_id")
+    existing_action_id = record.get("action_id")
     if existing_action_id not in (None, action_id):
         raise ValueError("decision.action_id does not match the frozen action_id")
 
-    projection.pop("decision_id", None)
-    projection.pop("label", None)
-    projection.pop("tool_call_id", None)
+    projection = {
+        field: record[field]
+        for field in (*DECISION_BOUND_AUTHORITY_FIELDS, *DECISION_BOUND_AUDIT_FIELDS)
+        if field in record and field != "action_id"
+    }
     projection["action_id"] = action_id
     projection["allowed_runtime_use"] = _sorted_unique_strings(
         projection["allowed_runtime_use"],
@@ -123,6 +161,17 @@ def continuation_matches(
         return False
 
 
+def _validate_decision_record(decision: Mapping[str, Any]) -> None:
+    """Reject malformed or schema-invalid decision records before hashing."""
+
+    if not isinstance(decision, Mapping):
+        raise TypeError("guardrail decision must be a mapping")
+    errors = validate_guardrail_decision(decision)
+    if errors:
+        joined = "; ".join(errors)
+        raise ValueError(f"guardrail decision schema validation failed: {joined}")
+
+
 def _exact_projection(
     source: Mapping[str, Any],
     *,
@@ -152,13 +201,13 @@ def _exact_projection(
 
 
 def _sorted_unique_strings(value: Any, field_name: str) -> list[str]:
-    """Normalize one semantic set without accepting malformed or duplicate items."""
+    """Normalize one semantic set using unsigned UTF-8 bytewise ordering."""
 
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ValueError(f"{field_name} must be a list of strings")
     if len(set(value)) != len(value):
         raise ValueError(f"{field_name} must not contain duplicates")
-    return sorted(value)
+    return sorted(value, key=lambda item: item.encode("utf-8"))
 
 
 def _require_sha256_ref(value: Any, field_name: str) -> None:
