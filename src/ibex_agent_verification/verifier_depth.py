@@ -32,6 +32,8 @@ REQUIRED_DEPTH: dict[str, VerifierDepth] = {
 
 
 def _parse_depth(value: Any) -> VerifierDepth | None:
+    """Parse a symbolic verifier depth, returning ``None`` for invalid input."""
+
     if not isinstance(value, str):
         return None
     try:
@@ -44,7 +46,7 @@ def authorize_transition(
     decision: Mapping[str, Any],
     proposed_transition: str,
 ) -> dict[str, Any]:
-    """Fail closed unless the verdict depth and explicit grant both permit a transition."""
+    """Fail closed unless the verdict depth and explicit grant permit a transition."""
 
     required = REQUIRED_DEPTH.get(proposed_transition)
     if required is None:
@@ -127,7 +129,7 @@ def continuation_matches(
 
 
 def evidence_resource_limits() -> dict[str, int]:
-    """Return crosswalk resource limits from the executable schema metadata."""
+    """Return crosswalk resource limits from executable schema metadata."""
 
     schema = load_guardrail_decision_schema()
     evidence_schema = schema["properties"]["evidence_refs"]
@@ -146,6 +148,8 @@ def evidence_resource_limits() -> dict[str, int]:
 
 
 def _evidence_resource_error(verdict: Mapping[str, Any]) -> str | None:
+    """Return the first pre-normalization evidence resource violation."""
+
     refs = verdict.get("evidence_refs")
     if not isinstance(refs, list):
         return None
@@ -170,6 +174,8 @@ def _evidence_resource_error(verdict: Mapping[str, Any]) -> str | None:
 
 
 def _crosswalk_profile_errors(verdict: Mapping[str, Any]) -> tuple[str, ...]:
+    """Validate crosswalk-only fields not required by the base decision schema."""
+
     errors: list[str] = []
     for field in ("claim_ceiling", "permitted_next_transition"):
         value = verdict.get(field)
@@ -179,6 +185,8 @@ def _crosswalk_profile_errors(verdict: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _evidence_key(verdict: Mapping[str, Any]) -> tuple[str, ...]:
+    """Build an order-independent identity key for validated evidence refs."""
+
     refs = verdict["evidence_refs"]
     return tuple(sorted(refs))
 
@@ -202,7 +210,9 @@ def validate_crosswalk(
             "status": "INCOMPARABLE",
             "reason": "INVALID_VERDICT_SHAPE",
             "invalid_sides": sorted(resource_errors),
-            "errors": resource_errors,
+            "errors": {
+                side: [error] for side, error in resource_errors.items()
+            },
         }
 
     schema_errors = {
@@ -237,6 +247,8 @@ def validate_crosswalk(
     )
 
     def normalize(field: str, verdict: Mapping[str, Any]) -> Any:
+        """Normalize order-insensitive fields before semantic comparison."""
+
         value = verdict[field]
         if field == "allowed_runtime_use":
             return tuple(sorted(value))
