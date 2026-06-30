@@ -28,3 +28,6 @@ ibex-av = "ibex_agent_verification.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+ibex_agent_verification = ["schemas/*.json"]
