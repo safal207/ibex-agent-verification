@@ -3,19 +3,27 @@
 > `⟦#⛓✓⟧` is the compact, non-normative symbol for a frozen, canonically
 > hashed, cryptographically linked, verified action record.
 
-The normative chain is:
+The normative linkage is:
 
 ```text
-evidence_refs
+action_envelope
+    │ canonical_action_id()
     ↓
-action_id
-    ↓
-decision_id
-    ↓
-execution_outcome_id
-    ↓
-audit_record_id
+action_id ───────────────┐
+                         │ canonical_decision_id()
+evidence_refs ───────────┤
+authority fields ────────┘
+                         ↓
+                    decision_id
+                         ↓
+              execution_outcome_id
+                         ↓
+                  audit_record_id
 ```
+
+`evidence_refs` are **not** part of `action_id`. They first enter the canonical
+preimage at the `decision_id` stage, where they are bound together with the
+frozen action identifier and the decision authority surface.
 
 Every downstream record **MUST** bind to the identifier of the exact upstream
 record it consumes.
@@ -74,9 +82,11 @@ Resume invariant:
 
 ## Decision identifier
 
-`decision_id` binds the action identifier to the decision's authority surface:
+`decision_id` binds the action identifier, evidence, and decision authority
+surface:
 
 ```text
+action_id
 schema_version
 decision
 reason_code
@@ -99,6 +109,7 @@ The identifier is:
 ```text
 decision_id = SHA-256(JCS({
   action_id,
+  evidence_refs,
   authority fields...
 }))
 ```
@@ -179,7 +190,32 @@ semantic.
 
 ## Cross-implementation alignment
 
-External participants have reported independent convergence on
-`SHA-256(JCS(...))` identifiers. This is useful evidence for interoperability,
-but compatibility is not claimed until implementations pass the same published
-conformance vectors byte-for-byte.
+Independent implementations may converge on the construction
+`SHA-256(JCS(...))` while still producing different identifiers for the same
+logical action. JCS removes differences in object-key ordering; it does not
+remove differences in:
+
+- field names or field sets;
+- value types;
+- timestamp representation;
+- namespace or identity normalization;
+- omitted versus explicit optional values.
+
+For example, `timestamp_ms` encoded as an integer and `timestamp` encoded as an
+ISO-8601 string are different preimages and therefore **MUST** produce different
+hashes.
+
+The current interoperability status is therefore:
+
+```text
+canonicalization construction: aligned in principle
+locked cross-builder preimage: pending
+cross-builder identifier equality: unclaimed
+```
+
+Compatibility becomes demonstrated only when every builder consumes the exact
+same published preimage — identical field names, values, value types, and
+optional-field rules — and reproduces the same canonical bytes and digest.
+This contract's locked action-envelope field set is the candidate convergence
+surface; external systems remain non-conformant until they pass its vectors
+byte-for-byte.
