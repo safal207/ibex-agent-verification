@@ -11,7 +11,11 @@ from ibex_agent_verification.action_chain import (
 )
 from ibex_agent_verification.canonical_json import canonicalize_jcs, sha256_jcs
 
-VECTOR = Path(__file__).resolve().parents[1] / "conformance" / "verifiable-action-chain-v1.json"
+VECTOR = (
+    Path(__file__).resolve().parents[1]
+    / "conformance"
+    / "verifiable-action-chain-v1.json"
+)
 
 
 class FullChainVectorTests(unittest.TestCase):
@@ -30,6 +34,10 @@ class FullChainVectorTests(unittest.TestCase):
 
         decision = vector["decision"]
         decision_preimage = json.loads(decision["canonical_preimage_utf8"])
+        self.assertEqual(
+            canonicalize_jcs(decision_preimage).decode(),
+            decision["canonical_preimage_utf8"],
+        )
         self.assertEqual(sha256_jcs(decision_preimage), decision["id"])
         self.assertEqual(
             canonical_decision_id(action["id"], decision["source_record"]),
@@ -37,7 +45,17 @@ class FullChainVectorTests(unittest.TestCase):
         )
 
         outcome = vector["execution_outcome"]
+        self.assertEqual(
+            canonicalize_jcs(outcome["payload"]).decode(),
+            outcome["payload_canonical_utf8"],
+        )
         self.assertEqual(sha256_jcs(outcome["payload"]), outcome["payload_ref"])
+        outcome_link = json.loads(outcome["link_canonical_utf8"])
+        self.assertEqual(
+            canonicalize_jcs(outcome_link).decode(),
+            outcome["link_canonical_utf8"],
+        )
+        self.assertEqual(sha256_jcs(outcome_link), outcome["id"])
         self.assertEqual(
             canonical_chain_record_id(
                 "execution_outcome",
@@ -48,7 +66,17 @@ class FullChainVectorTests(unittest.TestCase):
         )
 
         audit = vector["audit_record"]
+        self.assertEqual(
+            canonicalize_jcs(audit["payload"]).decode(),
+            audit["payload_canonical_utf8"],
+        )
         self.assertEqual(sha256_jcs(audit["payload"]), audit["payload_ref"])
+        audit_link = json.loads(audit["link_canonical_utf8"])
+        self.assertEqual(
+            canonicalize_jcs(audit_link).decode(),
+            audit["link_canonical_utf8"],
+        )
+        self.assertEqual(sha256_jcs(audit_link), audit["id"])
         self.assertEqual(
             canonical_chain_record_id(
                 "audit_record",
