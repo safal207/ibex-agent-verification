@@ -19,9 +19,7 @@
     "issued_at"
   ],
   "properties": {
-    "schema_version": {
-      "const": 1
-    },
+    "schema_version": {"const": 1},
     "decision_id": {
       "type": "string",
       "minLength": 3,
@@ -34,51 +32,22 @@
       "maxLength": 160,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]+$"
     },
-    "decision": {
-      "enum": ["ALLOW", "REPAIR", "SOFT_BLOCK", "HARD_BLOCK", "DEFER"]
-    },
-    "reason_code": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 160
-    },
-    "failure_class": {
-      "type": ["string", "null"],
-      "maxLength": 160
-    },
-    "violated_boundary": {
-      "type": ["string", "null"],
-      "maxLength": 240
-    },
-    "severity": {
-      "enum": ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL", null]
-    },
+    "label": {"type": ["string", "null"], "maxLength": 160},
+    "decision": {"enum": ["ALLOW", "REPAIR", "SOFT_BLOCK", "HARD_BLOCK", "DEFER"]},
+    "reason_code": {"type": "string", "minLength": 1, "maxLength": 160},
+    "failure_class": {"type": ["string", "null"], "maxLength": 160},
+    "violated_boundary": {"type": ["string", "null"], "maxLength": 240},
+    "severity": {"enum": ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL", null]},
     "retry_policy": {
-      "enum": [
-        "NEVER",
-        "AFTER_REPAIR",
-        "AFTER_REMEDIATION",
-        "AFTER_APPROVAL",
-        "WITH_BACKOFF",
-        null
-      ]
+      "enum": ["NEVER", "AFTER_REPAIR", "AFTER_REMEDIATION", "AFTER_APPROVAL", "WITH_BACKOFF", null]
     },
-    "suggested_replan_constraint": {
-      "type": ["object", "null"]
-    },
-    "required_remediation": {
-      "type": ["object", "null"]
-    },
-    "policy_version": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "verifier_depth": {
-      "enum": ["D0", "D1", "D2", "D3"]
-    },
+    "suggested_replan_constraint": {"type": ["object", "null"]},
+    "required_remediation": {"type": ["object", "null"]},
+    "policy_version": {"type": "string", "minLength": 1, "maxLength": 200},
+    "verifier_depth": {"enum": ["D0", "D1", "D2", "D3"]},
     "allowed_runtime_use": {
       "type": "array",
+      "maxItems": 7,
       "uniqueItems": true,
       "items": {
         "enum": [
@@ -92,49 +61,26 @@
         ]
       }
     },
-    "trust_domain": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 240
-    },
-    "recompute_mode": {
-      "type": ["string", "null"],
-      "maxLength": 160
-    },
-    "claim_ceiling": {
-      "type": ["string", "null"],
-      "maxLength": 160
-    },
-    "permitted_next_transition": {
-      "type": ["string", "null"],
-      "maxLength": 160
-    },
+    "trust_domain": {"type": "string", "minLength": 1, "maxLength": 240},
+    "recompute_mode": {"type": ["string", "null"], "maxLength": 160},
+    "claim_ceiling": {"type": ["string", "null"], "maxLength": 160},
+    "permitted_next_transition": {"type": ["string", "null"], "maxLength": 160},
     "evidence_refs": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 32,
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "minLength": 1,
-        "maxLength": 500
+        "minLength": 71,
+        "maxLength": 71,
+        "pattern": "^sha256:[0-9a-f]{64}$"
       }
     },
-    "issued_at": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "expires_at": {
-      "type": ["string", "null"],
-      "format": "date-time"
-    },
-    "continuation_id": {
-      "type": ["string", "null"],
-      "maxLength": 200
-    },
-    "action_id": {
-      "type": ["string", "null"],
-      "pattern": "^sha256:[0-9a-f]{64}$"
-    },
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": ["string", "null"], "format": "date-time"},
+    "continuation_id": {"type": ["string", "null"], "maxLength": 200},
+    "action_id": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
     "estimated_cost_avoided": {
       "type": ["object", "null"],
       "required": ["amount", "currency", "method"],
@@ -154,5 +100,23 @@
         "currency": {"type": "string", "minLength": 3, "maxLength": 3}
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"decision": {"const": "HARD_BLOCK"}},
+        "required": ["decision"]
+      },
+      "then": {
+        "properties": {
+          "allowed_runtime_use": {
+            "type": "array",
+            "maxItems": 1,
+            "uniqueItems": true,
+            "items": {"const": "AUDIT_LOG"}
+          }
+        }
+      }
+    }
+  ]
 }
