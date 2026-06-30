@@ -40,11 +40,13 @@ def _validate(value: Any, schema: Mapping[str, Any], path: str, errors: list[str
         if isinstance(branch, Mapping):
             _validate(value, branch, path, errors)
 
-    if "const" in schema and value != schema["const"]:
+    if "const" in schema and not _json_equal(value, schema["const"]):
         errors.append(f"{path}: expected constant {schema['const']!r}")
         return
 
-    if "enum" in schema and value not in schema["enum"]:
+    if "enum" in schema and not any(
+        _json_equal(value, candidate) for candidate in schema["enum"]
+    ):
         errors.append(f"{path}: value is not in enum")
         return
 
@@ -82,12 +84,10 @@ def _validate(value: Any, schema: Mapping[str, Any], path: str, errors: list[str
             errors.append(f"{path}: more than {max_items} items")
             return
         if schema.get("uniqueItems") is True:
-            canonical = [
-                json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-                for item in value
-            ]
-            if len(set(canonical)) != len(canonical):
-                errors.append(f"{path}: duplicate items are not allowed")
+            for index, item in enumerate(value):
+                if any(_json_equal(item, previous) for previous in value[:index]):
+                    errors.append(f"{path}: duplicate items are not allowed")
+                    break
         item_schema = schema.get("items")
         if isinstance(item_schema, Mapping):
             for index, item in enumerate(value):
@@ -109,6 +109,28 @@ def _validate(value: Any, schema: Mapping[str, Any], path: str, errors: list[str
     minimum = schema.get("minimum")
     if isinstance(minimum, (int, float)) and _is_number(value) and value < minimum:
         errors.append(f"{path}: value is below minimum {minimum}")
+
+
+def _json_equal(left: Any, right: Any) -> bool:
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    if _is_number(left) and _is_number(right):
+        return left == right
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        if set(left) != set(right):
+            return False
+        return all(_json_equal(left[key], right[key]) for key in left)
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _json_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    if type(left) is not type(right):
+        return False
+    try:
+        return left == right
+    except Exception:
+        return False
 
 
 def _matches_type(value: Any, declared: str) -> bool:
