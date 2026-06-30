@@ -19,7 +19,7 @@
     "issued_at"
   ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"type": "integer", "const": 1},
     "decision_id": {
       "type": "string",
       "minLength": 3,
@@ -70,6 +70,7 @@
       "minItems": 1,
       "maxItems": 32,
       "uniqueItems": true,
+      "x-maxAggregateUtf8Bytes": 2048,
       "items": {
         "type": "string",
         "minLength": 71,
