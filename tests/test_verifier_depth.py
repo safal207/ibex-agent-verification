@@ -30,7 +30,7 @@ def _envelope(**overrides: str) -> dict[str, str]:
 def _verdict(label: str, **overrides: object) -> dict[str, object]:
     verdict: dict[str, object] = {
         "label": label,
-        "evidence_digest": "sha256:evidence",
+        "evidence_refs": ["sha256:evidence"],
         "allowed_runtime_use": ["STRUCTURED_REPLAN"],
         "claim_ceiling": "bounded-third-party-reproducible",
         "permitted_next_transition": "REPLAN_WITHIN_TRUST_DOMAIN",
@@ -158,9 +158,33 @@ def test_same_label_with_different_authority_fails_closed() -> None:
 def test_crosswalk_with_different_evidence_is_incomparable() -> None:
     result = validate_crosswalk(
         _verdict("D2"),
-        _verdict("bounded@anchor", evidence_digest="sha256:other"),
+        _verdict("bounded@anchor", evidence_refs=["sha256:other"]),
     )
     assert result == {
         "status": "INCOMPARABLE",
         "reason": "EVIDENCE_MISMATCH",
     }
+
+
+def test_crosswalk_evidence_refs_order_independent() -> None:
+    # The binding is a set of refs; ordering must not change comparability.
+    a = _verdict("D2", evidence_refs=["sha256:a", "sha256:b"])
+    b = _verdict("D3", evidence_refs=["sha256:b", "sha256:a"])
+    assert validate_crosswalk(a, b)["status"] == "VALID"
+
+
+def test_crosswalk_missing_evidence_fails_closed() -> None:
+    # A verdict that carries no evidence binding cannot be compared against
+    # another — the authority claim is unanchored, so fail closed rather than
+    # treating two "no evidence" verdicts as a silent match.
+    no_evidence = _verdict("D2")
+    no_evidence.pop("evidence_refs")
+    result = validate_crosswalk(no_evidence, _verdict("D2"))
+    assert result == {"status": "INCOMPARABLE", "reason": "EVIDENCE_MISMATCH"}
+
+
+def test_crosswalk_same_evidence_same_authority_is_valid() -> None:
+    # Regression guard: with the schema's evidence_refs field, two same-evidence
+    # verdicts with an identical authority tuple must still grade VALID (the gate
+    # must not over-reject after being wired to the real field name).
+    assert validate_crosswalk(_verdict("terminal"), _verdict("D3"))["status"] == "VALID"
