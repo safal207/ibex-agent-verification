@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from functools import lru_cache
 from importlib.resources import files
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 
 @lru_cache(maxsize=1)
@@ -19,12 +19,7 @@ def load_guardrail_decision_schema() -> dict[str, Any]:
 
 
 def validate_guardrail_decision(instance: Mapping[str, Any]) -> tuple[str, ...]:
-    """Validate one decision against the published schema subset used here.
-
-    The validator is dependency-free but data-driven: every enforced constraint
-    is read from the packaged JSON Schema rather than duplicated as constants in
-    the crosswalk implementation.
-    """
+    """Validate one decision against the packaged normative JSON Schema."""
 
     if not isinstance(instance, Mapping):
         return ("$: expected object",)
@@ -85,6 +80,7 @@ def _validate(value: Any, schema: Mapping[str, Any], path: str, errors: list[str
             errors.append(f"{path}: fewer than {min_items} items")
         if isinstance(max_items, int) and len(value) > max_items:
             errors.append(f"{path}: more than {max_items} items")
+            return
         if schema.get("uniqueItems") is True:
             canonical = [
                 json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
