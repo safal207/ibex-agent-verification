@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import datetime
 from functools import lru_cache
@@ -160,9 +161,13 @@ def _matches_type(value: Any, declared: str) -> bool:
 
 
 def _is_number(value: Any) -> bool:
-    """Return whether a value is a JSON number rather than a boolean."""
+    """Return whether a value is a finite JSON number rather than a boolean."""
 
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
 
 
 def _is_datetime(value: str) -> bool:
