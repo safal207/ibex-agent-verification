@@ -52,21 +52,26 @@ def canonical_decision_id(
     action_id: str,
     decision: Mapping[str, Any],
 ) -> str:
-    """Bind the decision authority surface to one frozen action."""
+    """Bind evidence and decision authority to one frozen action."""
 
     _require_sha256_ref(action_id, "action_id")
-    existing_action_id = decision.get("action_id")
-    if existing_action_id not in (None, action_id):
-        raise ValueError("decision.action_id does not match the frozen action_id")
-
     projection = _exact_projection(
         decision,
         required=DECISION_BINDING_REQUIRED_FIELDS,
-        optional=DECISION_BINDING_OPTIONAL_FIELDS
-        + ("action_id", "decision_id", "label", "tool_call_id"),
+        optional=(
+            *DECISION_BINDING_OPTIONAL_FIELDS,
+            "action_id",
+            "decision_id",
+            "label",
+            "tool_call_id",
+        ),
         record_name="guardrail decision",
         reject_unknown=False,
     )
+    existing_action_id = projection.get("action_id")
+    if existing_action_id not in (None, action_id):
+        raise ValueError("decision.action_id does not match the frozen action_id")
+
     projection.pop("decision_id", None)
     projection.pop("label", None)
     projection.pop("tool_call_id", None)
@@ -87,7 +92,7 @@ def canonical_chain_record_id(
     upstream_id: str,
     payload_ref: str,
 ) -> str:
-    """Create one link in the evidence → action → decision → audit chain."""
+    """Create one link in the action → decision → outcome → audit chain."""
 
     if not isinstance(record_type, str) or not record_type:
         raise ValueError("record_type must be a non-empty string")
@@ -141,7 +146,7 @@ def _exact_projection(
 
     return {
         field: source[field]
-        for field in required + optional
+        for field in (*required, *optional)
         if field in source
     }
 
