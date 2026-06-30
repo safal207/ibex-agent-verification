@@ -44,14 +44,16 @@ Crosswalk evidence MUST be content-addressed:
 sha256:<64 lowercase hexadecimal characters>
 ```
 
-A mutable URL or human-readable locator does not establish byte identity. Such a
-locator may be carried elsewhere as metadata, but it cannot by itself prove that
-two decisions were derived from the same evidence.
+Each reference is therefore exactly 71 ASCII characters. A mutable URL or
+human-readable locator does not establish byte identity. Such a locator may be
+carried elsewhere as metadata, but it cannot by itself prove that two decisions
+were derived from the same evidence.
 
-Runtime resource bounds are applied before allocation-heavy normalization:
+Runtime resource bounds are applied before allocation-heavy normalization and are
+read from the executable schema metadata:
 
 - no more than 32 evidence references;
-- no reference longer than 500 characters;
+- every reference must have the exact 71-character content-addressed form;
 - no more than 2048 aggregate UTF-8 bytes;
 - duplicate references are rejected.
 
@@ -113,8 +115,8 @@ This follow-up incorporates:
   `babyblueviper1`;
 - CodeRabbit's 500-character boundary finding and PR-description evidence
   checklist;
-- contract, adversarial, systems, and resource-exhaustion review passes recorded
-  on PR #61.
+- contract, adversarial, systems, packaging, and resource-exhaustion review
+  passes recorded on PRs #61 and #62.
 
 The review comments are design inputs. The executable schema and regression tests
 are the source of truth.
