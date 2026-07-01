@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ibex-agent-verification:action-envelope:v1",
+  "title": "ActionEnvelopeV1",
+  "description": "Self-describing frozen authorization context for deterministic action identifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "@context",
+    "tool_identity",
+    "args_digest",
+    "caller_identity",
+    "resource_scope",
+    "policy_version"
+  ],
+  "properties": {
+    "@context": {
+      "const": "urn:ibex-agent-verification:action-envelope:v1"
+    },
+    "tool_identity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9._:/-]{0,127}$"
+    },
+    "args_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "caller_identity": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[a-z][a-z0-9._-]{0,31}:[a-z0-9][a-z0-9._:/-]{0,223}$"
+    },
+    "resource_scope": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[a-z][a-z0-9._-]{0,31}:[a-z0-9][a-z0-9._:/-]{0,223}$"
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "authorization_deadline": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    }
+  },
+  "examples": [
+    {
+      "@context": "urn:ibex-agent-verification:action-envelope:v1",
+      "tool_identity": "send_email",
+      "args_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "caller_identity": "agent:qa",
+      "resource_scope": "workspace:demo",
+      "policy_version": "policy-v1",
+      "authorization_deadline": "2026-07-01T05:00:00Z"
+    }
+  ]
+}

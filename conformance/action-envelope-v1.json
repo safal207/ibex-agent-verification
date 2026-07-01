@@ -1,0 +1,15 @@
+{
+  "profile": "ActionEnvelopeV1",
+  "schema": "urn:ibex-agent-verification:action-envelope:v1",
+  "preimage": {
+    "@context": "urn:ibex-agent-verification:action-envelope:v1",
+    "tool_identity": "send_email",
+    "args_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "caller_identity": "agent:qa",
+    "resource_scope": "workspace:demo",
+    "policy_version": "policy-v1",
+    "authorization_deadline": "2026-07-01T05:00:00Z"
+  },
+  "canonical_utf8": "{\"@context\":\"urn:ibex-agent-verification:action-envelope:v1\",\"args_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"authorization_deadline\":\"2026-07-01T05:00:00Z\",\"caller_identity\":\"agent:qa\",\"policy_version\":\"policy-v1\",\"resource_scope\":\"workspace:demo\",\"tool_identity\":\"send_email\"}",
+  "id": "sha256:325d87f3a89db334374b25f839c6dfcf528fac357b7c554b01a1486a570522c7"
+}

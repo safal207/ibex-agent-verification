@@ -1,38 +1,70 @@
-"""Dependency-free validation helpers for the packaged guardrail schema."""
+"""Dependency-free validation helpers for packaged contract schemas."""
 
 from __future__ import annotations
 
 import json
 import math
 import re
+from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
 from importlib.resources import files
 from typing import Any, Mapping
 
 
-@lru_cache(maxsize=1)
-def load_guardrail_decision_schema() -> dict[str, Any]:
-    """Load and cache the packaged GuardrailDecision JSON Schema."""
+@lru_cache(maxsize=None)
+def _load_packaged_schema(filename: str) -> dict[str, Any]:
+    """Load and privately cache one packaged JSON Schema by filename."""
 
-    schema_path = files("ibex_agent_verification").joinpath(
-        "schemas/guardrail-decision.schema.json"
-    )
+    schema_path = files("ibex_agent_verification").joinpath("schemas", filename)
     return json.loads(schema_path.read_text(encoding="utf-8"))
+
+
+def load_guardrail_decision_schema() -> dict[str, Any]:
+    """Return a defensive copy of the packaged GuardrailDecision schema."""
+
+    return deepcopy(_load_packaged_schema("guardrail-decision.schema.json"))
+
+
+def load_action_envelope_v1_schema() -> dict[str, Any]:
+    """Return a defensive copy of the packaged ActionEnvelopeV1 schema."""
+
+    return deepcopy(_load_packaged_schema("action-envelope-v1.schema.json"))
 
 
 def validate_guardrail_decision(instance: Mapping[str, Any]) -> tuple[str, ...]:
     """Return deterministic validation errors for one guardrail decision."""
 
+    return _validate_mapping(
+        instance,
+        _load_packaged_schema("guardrail-decision.schema.json"),
+    )
+
+
+def validate_action_envelope_v1(instance: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return deterministic validation errors for one ActionEnvelopeV1 record."""
+
+    return _validate_mapping(
+        instance,
+        _load_packaged_schema("action-envelope-v1.schema.json"),
+    )
+
+
+def _validate_mapping(
+    instance: Mapping[str, Any],
+    schema: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """Validate one mapping against a packaged schema with stable error order."""
+
     if not isinstance(instance, Mapping):
         return ("$: expected object",)
     errors: list[str] = []
-    _validate(instance, load_guardrail_decision_schema(), "$", errors)
+    _validate(instance, schema, "$", errors)
     return tuple(errors)
 
 
 def _validate(value: Any, schema: Mapping[str, Any], path: str, errors: list[str]) -> None:
-    """Recursively apply the schema keywords used by the guardrail contract."""
+    """Recursively apply the schema keywords used by the contract schemas."""
 
     for sub_schema in schema.get("allOf", []):
         _validate(value, sub_schema, path, errors)

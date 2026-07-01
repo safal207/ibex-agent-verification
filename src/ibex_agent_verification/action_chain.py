@@ -6,14 +6,22 @@ import re
 from typing import Any, Mapping
 
 from ibex_agent_verification.canonical_json import CanonicalizationError, sha256_jcs
-from ibex_agent_verification.schema_validation import validate_guardrail_decision
+from ibex_agent_verification.schema_validation import (
+    validate_action_envelope_v1,
+    validate_guardrail_decision,
+)
 
+ACTION_ENVELOPE_V1_CONTEXT = "urn:ibex-agent-verification:action-envelope:v1"
 ACTION_ENVELOPE_REQUIRED_FIELDS = (
     "tool_identity",
     "args_digest",
     "caller_identity",
     "resource_scope",
     "policy_version",
+)
+ACTION_ENVELOPE_V1_REQUIRED_FIELDS = (
+    "@context",
+    *ACTION_ENVELOPE_REQUIRED_FIELDS,
 )
 ACTION_ENVELOPE_OPTIONAL_FIELDS = ("authorization_deadline",)
 DECISION_BINDING_REQUIRED_FIELDS = (
@@ -72,15 +80,34 @@ _SHA256_REF = re.compile(r"^sha256:[0-9a-f]{64}$")
 def canonical_action_id(envelope: Mapping[str, Any]) -> str:
     """Bind a continuation to one exact frozen authorization context.
 
+    New adapters should provide the self-describing ActionEnvelopeV1 ``@context``.
+    The unversioned field set remains accepted only for compatibility with the
+    original published full-chain conformance vector.
+
     Unknown fields fail closed so an adapter cannot mutate an unbound part of
     the envelope between ``DEFER`` and resume.
     """
 
+    if isinstance(envelope, Mapping) and "@context" in envelope:
+        return canonical_action_envelope_v1_id(envelope)
     projection = _exact_projection(
         envelope,
         required=ACTION_ENVELOPE_REQUIRED_FIELDS,
         optional=ACTION_ENVELOPE_OPTIONAL_FIELDS,
-        record_name="action envelope",
+        record_name="legacy action envelope",
+    )
+    return sha256_jcs(projection)
+
+
+def canonical_action_envelope_v1_id(envelope: Mapping[str, Any]) -> str:
+    """Validate and hash one self-describing ActionEnvelopeV1 record."""
+
+    _validate_action_envelope_v1_record(envelope)
+    projection = _exact_projection(
+        envelope,
+        required=ACTION_ENVELOPE_V1_REQUIRED_FIELDS,
+        optional=ACTION_ENVELOPE_OPTIONAL_FIELDS,
+        record_name="ActionEnvelopeV1",
     )
     return sha256_jcs(projection)
 
@@ -159,6 +186,17 @@ def continuation_matches(
         return canonical_action_id(resumed_envelope) == frozen_action_id
     except (CanonicalizationError, TypeError, ValueError):
         return False
+
+
+def _validate_action_envelope_v1_record(envelope: Mapping[str, Any]) -> None:
+    """Reject malformed or schema-invalid ActionEnvelopeV1 records before hashing."""
+
+    if not isinstance(envelope, Mapping):
+        raise TypeError("ActionEnvelopeV1 must be a mapping")
+    errors = validate_action_envelope_v1(envelope)
+    if errors:
+        joined = "; ".join(errors)
+        raise ValueError(f"ActionEnvelopeV1 schema validation failed: {joined}")
 
 
 def _validate_decision_record(decision: Mapping[str, Any]) -> None:
