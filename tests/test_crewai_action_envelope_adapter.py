@@ -25,11 +25,15 @@ class Provider:
     name = "test"
 
     def __init__(self, allow=True, callback=None):
+        """Configure the decision and an optional evaluation callback."""
+
         self.allow = allow
         self.callback = callback
         self.requests = []
 
     def evaluate(self, request):
+        """Record one request, run the callback, and return the decision."""
+
         self.requests.append(request)
         if self.callback:
             self.callback(request)
@@ -40,6 +44,8 @@ class CrewAIAdapterTests(unittest.TestCase):
     """Verify deterministic IDs and fail-closed behavior."""
 
     def setUp(self):
+        """Build a structural CrewAI context from the published vector."""
+
         self.vector = json.loads(VECTOR.read_text(encoding="utf-8"))
         source = self.vector["hook_context"]
         self.context = SimpleNamespace(
@@ -54,6 +60,8 @@ class CrewAIAdapterTests(unittest.TestCase):
         self.config = CrewAIAdapterConfig(**cfg)
 
     def test_vector_recomputes(self):
+        """The adapter must reproduce the published action identifier."""
+
         envelope = build_crewai_action_envelope(self.context, self.config)
         self.assertEqual(
             canonical_action_envelope_v1_id(envelope),
@@ -61,6 +69,8 @@ class CrewAIAdapterTests(unittest.TestCase):
         )
 
     def test_allow_and_deny(self):
+        """Provider decisions must map to CrewAI allow and block semantics."""
+
         allow = Provider(True)
         self.assertIsNone(
             make_crewai_before_tool_call_hook(allow, self.config)(self.context)
@@ -73,7 +83,11 @@ class CrewAIAdapterTests(unittest.TestCase):
         )
 
     def test_live_argument_drift_blocks(self):
+        """Arguments changed during evaluation must invalidate authorization."""
+
         def mutate(_request):
+            """Change the live CrewAI argument mapping during evaluation."""
+
             self.context.tool_input["recipient"] = "other"
 
         hook = make_crewai_before_tool_call_hook(
@@ -83,6 +97,8 @@ class CrewAIAdapterTests(unittest.TestCase):
         self.assertIs(hook(self.context), False)
 
     def test_unsupported_number_fails_closed(self):
+        """Unsupported floats must block unless fail-open is explicit."""
+
         self.context.tool_input["temperature"] = 0.5
         closed = make_crewai_before_tool_call_hook(Provider(), self.config)
         self.assertIs(closed(self.context), False)
@@ -95,6 +111,8 @@ class CrewAIAdapterTests(unittest.TestCase):
         self.assertIsNone(opened(self.context))
 
     def test_registered_hook_must_remain_last(self):
+        """Registration-order drift must block the tool call."""
+
         hooks = []
         hook = register_crewai_guardrail(
             Provider(),
