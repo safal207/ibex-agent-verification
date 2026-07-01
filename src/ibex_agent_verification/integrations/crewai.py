@@ -39,12 +39,7 @@ def register_crewai_guardrail(
     register_hook: CrewAIHookRegistrar | None = None,
     get_hooks: CrewAIHookRegistryReader | None = None,
 ) -> CrewAIBeforeHook:
-    """Register authorization as the final CrewAI before-tool-call hook.
-
-    CrewAI allows earlier hooks to mutate ``tool_input``. The registered wrapper
-    checks its position on every invocation and blocks if another hook was added
-    after it, ensuring the action ID covers the arguments that will execute.
-    """
+    """Register authorization as the final CrewAI before-tool-call hook."""
 
     if (register_hook is None) != (get_hooks is None):
         raise ValueError("register_hook and get_hooks must be provided together")
@@ -61,7 +56,10 @@ def register_crewai_guardrail(
     authorize = make_crewai_before_tool_call_hook(provider, config)
 
     def _registered_hook(context: CrewAIToolCallContext) -> bool | None:
-        hooks = get_hooks()
+        try:
+            hooks = get_hooks()
+        except Exception:
+            return False if config.fail_closed else None
         if not hooks or hooks[-1] is not _registered_hook:
             return False
         return authorize(context)
