@@ -41,6 +41,15 @@ _CLAIM_LIMITATION_MARKERS = (
     "not a production deployment claim",
     "not a physical production execution claim",
 )
+ATTESTED_SIGNER_FILES = {
+    "signer/source-artifacts-api.json",
+    "signer/source-artifact-selection.json",
+    "signer/source-artifact-extraction.json",
+    "signer/live-release.json",
+    "signer/runtime-observation.json",
+    "signer/source-validation.json",
+}
+EXPECTED_ATTESTED_FILES = EXPECTED_SOURCE_FILES | ATTESTED_SIGNER_FILES
 
 
 def _claim_boundary(value: Any) -> str:
@@ -66,6 +75,7 @@ def audit_signed_reference(
     expected_source_workflow: str,
     expected_signer_workflow: str,
 ) -> dict[str, Any]:
+    """Audit the exact signed runtime source and its signer-side observations."""
     root = root_dir.resolve(strict=True)
     repo = repository(expected_repository, label="expected repository")
     source_commit = commit(expected_commit, label="expected commit")
@@ -86,9 +96,10 @@ def audit_signed_reference(
     receipt_path = root / "manifest-receipt.json"
     report_path = root / "proofqa-gate-report.json"
     sigstore_path = root / "manifest.sigstore.json"
-    selection_path = root / "source-artifact-selection.json"
-    extraction_path = root / "source-artifact-extraction.json"
-    validation_path = root / "source-validation.json"
+    selection_path = bundle / "signer/source-artifact-selection.json"
+    extraction_path = bundle / "signer/source-artifact-extraction.json"
+    observation_path = bundle / "signer/runtime-observation.json"
+    validation_path = bundle / "signer/source-validation.json"
 
     manifest = load_json_object(manifest_path, label="transition manifest")
     provenance = load_json_object(provenance_path, label="source provenance")
@@ -97,6 +108,7 @@ def audit_signed_reference(
     load_json_object(sigstore_path, label="Sigstore bundle")
     selection = load_json_object(selection_path, label="artifact selection")
     extraction = load_json_object(extraction_path, label="artifact extraction")
+    observation = load_json_object(observation_path, label="runtime observation")
     validation = load_json_object(validation_path, label="source validation")
 
     if provenance.get("repository") != repo:
@@ -125,9 +137,12 @@ def audit_signed_reference(
         for item in files
         if isinstance(item, dict) and isinstance(item.get("path"), str)
     }
-    if paths != EXPECTED_SOURCE_FILES or len(files) != len(EXPECTED_SOURCE_FILES):
+    if (
+        paths != EXPECTED_ATTESTED_FILES
+        or len(files) != len(EXPECTED_ATTESTED_FILES)
+    ):
         raise TrustedTransitionArtifactError(
-            "manifest inventory is not the exact ingested source set"
+            "manifest inventory is not the exact source plus signer-evidence set"
         )
 
     if selection.get("schema_version") != 1 or selection.get("status") != "SELECTED":
@@ -164,6 +179,37 @@ def audit_signed_reference(
     ):
         raise TrustedTransitionArtifactError("artifact extraction digest mismatch")
 
+    if (
+        observation.get("schema_version") != 1
+        or observation.get("status") != "OBSERVED"
+    ):
+        raise TrustedTransitionArtifactError("runtime observation is not OBSERVED")
+    if (
+        observation.get("repository") != repo
+        or observation.get("source_commit") != source_commit
+    ):
+        raise TrustedTransitionArtifactError("runtime observation identity mismatch")
+    if (
+        observation.get("runtime_workflow") != source_workflow
+        or observation.get("runtime_run_id") != run_id
+        or observation.get("runtime_run_attempt") != run_attempt
+    ):
+        raise TrustedTransitionArtifactError(
+            "runtime observation workflow identity mismatch"
+        )
+    if observation.get("claim_boundary") != claim_boundary:
+        raise TrustedTransitionArtifactError(
+            "runtime observation claim boundary mismatch"
+        )
+    destination = provenance.get("destination")
+    if (
+        not isinstance(destination, dict)
+        or observation.get("destination_id") != destination.get("identity")
+    ):
+        raise TrustedTransitionArtifactError(
+            "runtime observation destination mismatch"
+        )
+
     if validation.get("schema_version") != 1 or validation.get("status") != "VALIDATED":
         raise TrustedTransitionArtifactError("source validation is not VALIDATED")
     if (
@@ -178,7 +224,9 @@ def audit_signed_reference(
         or validation_deployment.get("run_id") != run_id
         or validation_deployment.get("run_attempt") != run_attempt
     ):
-        raise TrustedTransitionArtifactError("source validation workflow identity mismatch")
+        raise TrustedTransitionArtifactError(
+            "source validation workflow identity mismatch"
+        )
     if validation.get("files_checked") != len(EXPECTED_SOURCE_FILES):
         raise TrustedTransitionArtifactError("source validation file count mismatch")
     if validation.get("claim_boundary") != claim_boundary:
@@ -244,6 +292,7 @@ def audit_signed_reference(
         },
         "selection_report_sha256": sha256_file(selection_path),
         "extraction_report_sha256": sha256_file(extraction_path),
+        "runtime_observation_sha256": sha256_file(observation_path),
         "source_validation_sha256": sha256_file(validation_path),
     }
 
