@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
 from importlib.resources import files
@@ -13,34 +14,40 @@ from typing import Any, Mapping
 
 @lru_cache(maxsize=None)
 def _load_packaged_schema(filename: str) -> dict[str, Any]:
-    """Load and cache one packaged JSON Schema by filename."""
+    """Load and privately cache one packaged JSON Schema by filename."""
 
     schema_path = files("ibex_agent_verification").joinpath("schemas", filename)
     return json.loads(schema_path.read_text(encoding="utf-8"))
 
 
 def load_guardrail_decision_schema() -> dict[str, Any]:
-    """Load and cache the packaged GuardrailDecision JSON Schema."""
+    """Return a defensive copy of the packaged GuardrailDecision schema."""
 
-    return _load_packaged_schema("guardrail-decision.schema.json")
+    return deepcopy(_load_packaged_schema("guardrail-decision.schema.json"))
 
 
 def load_action_envelope_v1_schema() -> dict[str, Any]:
-    """Load and cache the packaged ActionEnvelopeV1 JSON Schema."""
+    """Return a defensive copy of the packaged ActionEnvelopeV1 schema."""
 
-    return _load_packaged_schema("action-envelope-v1.schema.json")
+    return deepcopy(_load_packaged_schema("action-envelope-v1.schema.json"))
 
 
 def validate_guardrail_decision(instance: Mapping[str, Any]) -> tuple[str, ...]:
     """Return deterministic validation errors for one guardrail decision."""
 
-    return _validate_mapping(instance, load_guardrail_decision_schema())
+    return _validate_mapping(
+        instance,
+        _load_packaged_schema("guardrail-decision.schema.json"),
+    )
 
 
 def validate_action_envelope_v1(instance: Mapping[str, Any]) -> tuple[str, ...]:
     """Return deterministic validation errors for one ActionEnvelopeV1 record."""
 
-    return _validate_mapping(instance, load_action_envelope_v1_schema())
+    return _validate_mapping(
+        instance,
+        _load_packaged_schema("action-envelope-v1.schema.json"),
+    )
 
 
 def _validate_mapping(
