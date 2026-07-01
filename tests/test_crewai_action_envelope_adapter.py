@@ -45,6 +45,7 @@ class CrewAIAdapterTests(unittest.TestCase):
         self.context = SimpleNamespace(
             tool_name=source["tool_name"],
             tool_input=dict(source["tool_input"]),
+            tool=SimpleNamespace(name=source["tool_name"]),
             agent=SimpleNamespace(role=source["agent_role"]),
             task=SimpleNamespace(description="test task"),
             crew=None,
