@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from enum import IntEnum
 from typing import Any, Mapping
 
+from ibex_agent_verification.action_chain import (
+    canonical_action_id as _canonical_action_id,
+    continuation_matches as _continuation_matches,
+)
 from ibex_agent_verification.schema_validation import (
     load_guardrail_decision_schema,
     validate_guardrail_decision,
@@ -97,35 +99,18 @@ def authorize_transition(
 
 
 def canonical_action_id(envelope: Mapping[str, Any]) -> str:
-    """Bind a continuation to one frozen authorization context."""
+    """Delegate to the canonical action-chain identifier implementation."""
 
-    required_fields = (
-        "tool_identity",
-        "args_digest",
-        "caller_identity",
-        "resource_scope",
-        "policy_version",
-    )
-    missing = [field for field in required_fields if field not in envelope]
-    if missing:
-        raise ValueError(f"action envelope missing required fields: {missing}")
-
-    canonical = json.dumps(
-        {field: envelope[field] for field in required_fields},
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+    return _canonical_action_id(envelope)
 
 
 def continuation_matches(
     frozen_action_id: str,
     resumed_envelope: Mapping[str, Any],
 ) -> bool:
-    """Return true only for the exact frozen action context."""
+    """Delegate fail-closed continuation checks to the action-chain implementation."""
 
-    return canonical_action_id(resumed_envelope) == frozen_action_id
+    return _continuation_matches(frozen_action_id, resumed_envelope)
 
 
 def evidence_resource_limits() -> dict[str, int]:
