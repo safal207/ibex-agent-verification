@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/safal207/ibex-agent-verification/main/src/ibex_agent_verification/schemas/action-envelope-v1.schema.json",
+  "$id": "urn:ibex-agent-verification:action-envelope:v1",
   "title": "ActionEnvelopeV1",
   "description": "Self-describing frozen authorization context for deterministic action identifiers.",
   "type": "object",
@@ -15,7 +15,7 @@
   ],
   "properties": {
     "@context": {
-      "const": "https://raw.githubusercontent.com/safal207/ibex-agent-verification/main/src/ibex_agent_verification/schemas/action-envelope-v1.schema.json"
+      "const": "urn:ibex-agent-verification:action-envelope:v1"
     },
     "tool_identity": {
       "type": "string",
@@ -53,7 +53,7 @@
   },
   "examples": [
     {
-      "@context": "https://raw.githubusercontent.com/safal207/ibex-agent-verification/main/src/ibex_agent_verification/schemas/action-envelope-v1.schema.json",
+      "@context": "urn:ibex-agent-verification:action-envelope:v1",
       "tool_identity": "send_email",
       "args_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "caller_identity": "agent:qa",
