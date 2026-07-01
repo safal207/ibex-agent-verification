@@ -41,6 +41,15 @@ class CrewAIIdentityBindingTests(unittest.TestCase):
         self.context.agent.id = "stable-key"
         self.assertNotEqual(role_only, self.action_id())
 
+    def test_empty_authorization_namespace_is_rejected(self):
+        for config in (
+            CrewAIAdapterConfig(resource_scope="", policy_version="policy-v1"),
+            CrewAIAdapterConfig(resource_scope="workspace:demo", policy_version=""),
+        ):
+            with self.subTest(config=config):
+                with self.assertRaisesRegex(ValueError, "non-empty string"):
+                    build_crewai_action_envelope(self.context, config)
+
 
 if __name__ == "__main__":
     unittest.main()
