@@ -1,0 +1,15 @@
+{
+  "profile": "ActionEnvelopeV1",
+  "schema": "https://raw.githubusercontent.com/safal207/ibex-agent-verification/main/src/ibex_agent_verification/schemas/action-envelope-v1.schema.json",
+  "preimage": {
+    "@context": "https://raw.githubusercontent.com/safal207/ibex-agent-verification/main/src/ibex_agent_verification/schemas/action-envelope-v1.schema.json",
+    "tool_identity": "send_email",
+    "args_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "caller_identity": "agent:qa",
+    "resource_scope": "workspace:demo",
+    "policy_version": "policy-v1",
+    "authorization_deadline": "2026-07-01T05:00:00Z"
+  },
+  "canonical_utf8": "{\"@context\":\"https://raw.githubusercontent.com/safal207/ibex-agent-verification/main/src/ibex_agent_verification/schemas/action-envelope-v1.schema.json\",\"args_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"authorization_deadline\":\"2026-07-01T05:00:00Z\",\"caller_identity\":\"agent:qa\",\"policy_version\":\"policy-v1\",\"resource_scope\":\"workspace:demo\",\"tool_identity\":\"send_email\"}",
+  "id": "sha256:24d73b265e90f5a8bc4a2ff1b75e9f7f4eeafa4a3c4fce3cb9de839f3a458080"
+}
