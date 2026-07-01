@@ -12,7 +12,7 @@ The reference CrewAI API inspected for the conformance vector is commit:
 ## Mapping
 
 ```text
-ToolCallHookContext.tool_name
+ToolCallHookContext.tool.name
   -> SHA-256(exact UTF-8)
   -> tool_identity
 
@@ -20,8 +20,8 @@ ToolCallHookContext.tool_input
   -> restricted JCS
   -> args_digest
 
-ToolCallHookContext.agent.role
-  -> SHA-256(exact UTF-8)
+ToolCallHookContext.agent.id
+  -> SHA-256(exact stable identity)
   -> caller_identity
 
 configured resource scope + policy version
@@ -29,8 +29,15 @@ configured resource scope + policy version
   -> action_id
 ```
 
-Exact text is hashed instead of slugged by this adapter. That avoids collisions
-where different role or tool strings normalize to the same spelling.
+CrewAI passes a sanitized `context.tool_name` to hooks. The adapter keeps that
+value in the provider request for diagnostics, but binds `context.tool.name`
+when available so different original tool names cannot collapse to the same
+sanitized identity.
+
+CrewAI's frozen agent UUID is preferred for `caller_identity`. When no stable
+agent ID is exposed by a compatible context, the adapter hashes the exact role
+string as a compatibility fallback. An absent agent uses the explicit anonymous
+identity.
 
 ## Hook behavior
 
@@ -80,6 +87,10 @@ The published fixture is:
 ```text
 conformance/crewai-action-envelope-v1.json
 ```
+
+The published vector intentionally exercises the role fallback so builders that
+do not expose CrewAI model objects can still reproduce it. Runtime CrewAI
+contexts should bind the frozen agent ID when available.
 
 Expected action identifier:
 
