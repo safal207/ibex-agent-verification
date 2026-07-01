@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
+from uuid import UUID
 
 from ibex_agent_verification.action_chain import (
     ACTION_ENVELOPE_V1_CONTEXT,
@@ -21,6 +22,7 @@ class CrewAIToolCallContext(Protocol):
 
     tool_name: str
     tool_input: dict[str, Any]
+    tool: Any
     agent: Any | None
     task: Any | None
     crew: Any | None
@@ -43,7 +45,9 @@ class CrewAIGuardrailRequest:
     action_id: str
     action_envelope: Mapping[str, Any]
     tool_name: str
+    sanitized_tool_name: str
     tool_input: Mapping[str, Any]
+    agent_id: str | None = None
     agent_role: str | None = None
     task_description: str | None = None
 
@@ -74,19 +78,24 @@ def build_crewai_action_envelope(
 ) -> dict[str, Any]:
     """Build and validate ActionEnvelopeV1 from a CrewAI hook context."""
 
-    tool_name = _required_text(context.tool_name, "context.tool_name")
+    sanitized_name = _required_text(context.tool_name, "context.tool_name")
+    tool_name = _optional_text_attr(context.tool, "name") or sanitized_name
     tool_input = _snapshot_tool_input(context.tool_input)
+    agent_id = _optional_identity_attr(context.agent, "id")
     agent_role = _optional_text_attr(context.agent, "role")
+
+    if agent_id is not None:
+        caller_identity = _identity_ref("crewai-agent-id", agent_id)
+    elif agent_role is not None:
+        caller_identity = _identity_ref("crewai-agent-role", agent_role)
+    else:
+        caller_identity = "crewai-agent:anonymous"
 
     envelope: dict[str, Any] = {
         "@context": ACTION_ENVELOPE_V1_CONTEXT,
         "tool_identity": _identity_ref("crewai-tool", tool_name),
         "args_digest": sha256_jcs(tool_input),
-        "caller_identity": (
-            _identity_ref("crewai-agent", agent_role)
-            if agent_role is not None
-            else "crewai-agent:anonymous"
-        ),
+        "caller_identity": caller_identity,
         "resource_scope": config.resource_scope,
         "policy_version": config.policy_version,
     }
@@ -107,11 +116,14 @@ def evaluate_crewai_tool_call(
     try:
         envelope = build_crewai_action_envelope(context, config)
         action_id = canonical_action_envelope_v1_id(envelope)
+        tool_name = _optional_text_attr(context.tool, "name") or context.tool_name
         request = CrewAIGuardrailRequest(
             action_id=action_id,
             action_envelope=deepcopy(envelope),
-            tool_name=context.tool_name,
+            tool_name=tool_name,
+            sanitized_tool_name=context.tool_name,
             tool_input=_snapshot_tool_input(context.tool_input),
+            agent_id=_optional_identity_attr(context.agent, "id"),
             agent_role=_optional_text_attr(context.agent, "role"),
             task_description=_optional_text_attr(context.task, "description"),
         )
@@ -159,3 +171,16 @@ def _optional_text_attr(source: Any, field_name: str) -> str | None:
         return None
     value = getattr(source, field_name, None)
     return value if isinstance(value, str) and value else None
+
+
+def _optional_identity_attr(source: Any, field_name: str) -> str | None:
+    """Read one stable string or UUID identity attribute."""
+
+    if source is None:
+        return None
+    value = getattr(source, field_name, None)
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, UUID):
+        return str(value)
+    return None
