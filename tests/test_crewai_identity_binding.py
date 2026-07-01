@@ -39,7 +39,10 @@ class CrewAIIdentityBindingTests(unittest.TestCase):
     def test_stable_agent_key_is_preferred(self):
         role_only = self.action_id()
         self.context.agent.id = "stable-key"
-        self.assertNotEqual(role_only, self.action_id())
+        with_key = self.action_id()
+        self.assertNotEqual(role_only, with_key)
+        self.context.agent.role = "Different Role"
+        self.assertEqual(with_key, self.action_id())
 
     def test_empty_authorization_namespace_is_rejected(self):
         for config in (
