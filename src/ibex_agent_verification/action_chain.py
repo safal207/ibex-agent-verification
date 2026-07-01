@@ -11,10 +11,7 @@ from ibex_agent_verification.schema_validation import (
     validate_guardrail_decision,
 )
 
-ACTION_ENVELOPE_V1_CONTEXT = (
-    "https://raw.githubusercontent.com/safal207/ibex-agent-verification/"
-    "main/src/ibex_agent_verification/schemas/action-envelope-v1.schema.json"
-)
+ACTION_ENVELOPE_V1_CONTEXT = "urn:ibex-agent-verification:action-envelope:v1"
 ACTION_ENVELOPE_REQUIRED_FIELDS = (
     "tool_identity",
     "args_digest",
