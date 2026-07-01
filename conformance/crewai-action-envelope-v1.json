@@ -1,0 +1,17 @@
+{
+  "profile": "CrewAIActionEnvelopeV1",
+  "crewai_source_commit": "1452ee2021b1ac1555c817bb83b59e30dd3ce9a8",
+  "hook_context": {
+    "tool_name": "send_email",
+    "tool_input": {
+      "body": "hello",
+      "recipient": "qa"
+    },
+    "agent_role": "QA Agent"
+  },
+  "adapter_config": {
+    "resource_scope": "workspace:demo",
+    "policy_version": "policy-v1"
+  },
+  "action_id": "sha256:b6ed48d2dfc400f860b42b4ef3d46d1ca1e8eb362d249f252817448a892ef59d"
+}
