@@ -124,6 +124,36 @@ class CrewAIAdapterTests(unittest.TestCase):
         hooks.append(lambda _context: None)
         self.assertIs(hook(self.context), False)
 
+    def test_registry_read_failure_respects_policy(self):
+        """Registry errors must block by default and open only by opt-out."""
+
+        def broken_registry():
+            """Simulate CrewAI registry API failure."""
+
+            raise RuntimeError("registry unavailable")
+
+        hooks = []
+        closed = register_crewai_guardrail(
+            Provider(),
+            self.config,
+            register_hook=hooks.append,
+            get_hooks=broken_registry,
+        )
+        self.assertIs(closed(self.context), False)
+
+        open_config = CrewAIAdapterConfig(
+            resource_scope="workspace:demo",
+            policy_version="policy-v1",
+            fail_closed=False,
+        )
+        opened = register_crewai_guardrail(
+            Provider(),
+            open_config,
+            register_hook=hooks.append,
+            get_hooks=broken_registry,
+        )
+        self.assertIsNone(opened(self.context))
+
 
 if __name__ == "__main__":
     unittest.main()
