@@ -87,7 +87,7 @@ def build_crewai_action_envelope(
     if agent_id is not None:
         caller_identity = _identity_ref("crewai-agent-id", agent_id)
     elif agent_role is not None:
-        caller_identity = _identity_ref("crewai-agent-role", agent_role)
+        caller_identity = _identity_ref("crewai-agent", agent_role)
     else:
         caller_identity = "crewai-agent:anonymous"
 
