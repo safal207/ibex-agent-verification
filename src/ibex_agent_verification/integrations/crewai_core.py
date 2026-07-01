@@ -81,6 +81,8 @@ def build_crewai_action_envelope(
     sanitized_name = _required_text(context.tool_name, "context.tool_name")
     tool_name = _optional_text_attr(context.tool, "name") or sanitized_name
     tool_input = _snapshot_tool_input(context.tool_input)
+    resource_scope = _required_text(config.resource_scope, "config.resource_scope")
+    policy_version = _required_text(config.policy_version, "config.policy_version")
     agent_id = _optional_identity_attr(context.agent, "id")
     agent_role = _optional_text_attr(context.agent, "role")
 
@@ -96,8 +98,8 @@ def build_crewai_action_envelope(
         "tool_identity": _identity_ref("crewai-tool", tool_name),
         "args_digest": sha256_jcs(tool_input),
         "caller_identity": caller_identity,
-        "resource_scope": config.resource_scope,
-        "policy_version": config.policy_version,
+        "resource_scope": resource_scope,
+        "policy_version": policy_version,
     }
     if config.authorization_deadline is not None:
         envelope["authorization_deadline"] = config.authorization_deadline
