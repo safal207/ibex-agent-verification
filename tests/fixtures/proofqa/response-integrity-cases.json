@@ -1,0 +1,111 @@
+{
+  "fixture_version": "0.1",
+  "profile": "org.ibex.response-integrity.v0.1",
+  "transition_id": "release/mobile-production-manifest",
+  "observation_ref": "manifest:evidence/result.json",
+  "cases": [
+    {
+      "case_id": "supported_exact_result",
+      "response_text": "The strict gate accepted the candidate release exactly once.",
+      "claims": [
+        {
+          "claim_id": "claim-1",
+          "claim_text": "The candidate release was accepted exactly once by the strict gate.",
+          "observation_refs": ["manifest:evidence/result.json"],
+          "comparison": {
+            "kind": "JSON_POINTER_EQUALS",
+            "pointer": "/result",
+            "expected_value": "Candidate release was accepted exactly once by the strict gate."
+          },
+          "verdict": "SUPPORTED",
+          "reason_code": "EXACT_RESULT_BINDING"
+        }
+      ],
+      "overall_verdict": "VERIFIED"
+    },
+    {
+      "case_id": "fabricated_plausible_result",
+      "response_text": "The strict gate accepted the candidate release and deployed it globally.",
+      "claims": [
+        {
+          "claim_id": "claim-1",
+          "claim_text": "The candidate release was deployed globally.",
+          "observation_refs": ["manifest:evidence/result.json"],
+          "comparison": {
+            "kind": "JSON_POINTER_EQUALS",
+            "pointer": "/result",
+            "expected_value": "Candidate release was deployed globally."
+          },
+          "verdict": "CONTRADICTED",
+          "reason_code": "RESULT_VALUE_MISMATCH"
+        }
+      ],
+      "overall_verdict": "FAILED"
+    },
+    {
+      "case_id": "count_drift",
+      "response_text": "The strict gate accepted the candidate release exactly twice.",
+      "claims": [
+        {
+          "claim_id": "claim-1",
+          "claim_text": "The candidate release was accepted exactly twice.",
+          "observation_refs": ["manifest:evidence/result.json"],
+          "comparison": {
+            "kind": "JSON_POINTER_EQUALS",
+            "pointer": "/result",
+            "expected_value": "Candidate release was accepted exactly twice by the strict gate."
+          },
+          "verdict": "CONTRADICTED",
+          "reason_code": "COUNT_MISMATCH"
+        }
+      ],
+      "overall_verdict": "FAILED"
+    },
+    {
+      "case_id": "missing_citation_binding",
+      "response_text": "The strict gate accepted the candidate release exactly once.",
+      "claims": [
+        {
+          "claim_id": "claim-1",
+          "claim_text": "The candidate release was accepted exactly once.",
+          "observation_refs": [],
+          "comparison": {
+            "kind": "REFERENCE_PRESENT"
+          },
+          "verdict": "UNVERIFIABLE",
+          "reason_code": "OBSERVATION_REFERENCE_MISSING"
+        }
+      ],
+      "overall_verdict": "FAILED"
+    },
+    {
+      "case_id": "mixed_supported_and_unverifiable",
+      "response_text": "The strict gate accepted the release exactly once and no users were affected.",
+      "claims": [
+        {
+          "claim_id": "claim-1",
+          "claim_text": "The candidate release was accepted exactly once by the strict gate.",
+          "observation_refs": ["manifest:evidence/result.json"],
+          "comparison": {
+            "kind": "JSON_POINTER_EQUALS",
+            "pointer": "/result",
+            "expected_value": "Candidate release was accepted exactly once by the strict gate."
+          },
+          "verdict": "SUPPORTED",
+          "reason_code": "EXACT_RESULT_BINDING"
+        },
+        {
+          "claim_id": "claim-2",
+          "claim_text": "No users were affected.",
+          "observation_refs": [],
+          "comparison": {
+            "kind": "REFERENCE_PRESENT"
+          },
+          "verdict": "UNVERIFIABLE",
+          "reason_code": "NO_SUPPORTING_OBSERVATION"
+        }
+      ],
+      "overall_verdict": "PARTIAL"
+    }
+  ]
+}
