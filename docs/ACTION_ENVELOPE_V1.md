@@ -5,15 +5,24 @@ freezing one tool-call authorization context before policy evaluation.
 
 ## Schema identity
 
-Every V1 envelope includes the exact schema URI in `@context`:
+Every V1 envelope includes the immutable, versioned schema identifier in
+`@context`:
 
 ```text
-https://raw.githubusercontent.com/safal207/ibex-agent-verification/main/src/ibex_agent_verification/schemas/action-envelope-v1.schema.json
+urn:ibex-agent-verification:action-envelope:v1
 ```
 
-The same URI is the JSON Schema `$id`. Because `@context` is part of the
-canonical preimage, changing the profile changes `action_id` and therefore
-fails continuation matching.
+The same URN is the JSON Schema `$id`. The executable schema bytes are packaged
+at:
+
+```text
+src/ibex_agent_verification/schemas/action-envelope-v1.schema.json
+```
+
+Consumers should resolve the stable URN to the packaged or otherwise explicitly
+trusted schema bytes. It deliberately does not point at a mutable Git branch.
+Because `@context` is part of the canonical preimage, changing the profile
+changes `action_id` and therefore fails continuation matching.
 
 ## Locked fields
 
@@ -68,7 +77,7 @@ conformance/action-envelope-v1.json
 Expected identifier for that vector:
 
 ```text
-sha256:24d73b265e90f5a8bc4a2ff1b75e9f7f4eeafa4a3c4fce3cb9de839f3a458080
+sha256:325d87f3a89db334374b25f839c6dfcf528fac357b7c554b01a1486a570522c7
 ```
 
 ## Compatibility and migration
@@ -78,6 +87,10 @@ sha256:24d73b265e90f5a8bc4a2ff1b75e9f7f4eeafa4a3c4fce3cb9de839f3a458080
 `canonical_action_id()` also recognizes V1 when `@context` is present. It still
 accepts the original unversioned action-envelope field set so the published
 full-chain vector and existing adapters do not break during migration.
+
+The compatibility exports in `ibex_agent_verification.verifier_depth` delegate
+to the same implementation, so old imports cannot bypass V1 context binding or
+continuation checks.
 
 New adapters should emit and validate `ActionEnvelopeV1`. The unversioned path
 is compatibility-only and should not be used as a new cross-implementation
