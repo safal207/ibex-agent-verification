@@ -25,7 +25,11 @@ def main() -> int:
     parser.add_argument("--github-output")
     args = parser.parse_args()
 
-    reviews = json.loads(Path(args.reviews).read_text(encoding="utf-8"))
+    try:
+        reviews = json.loads(Path(args.reviews).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        reviews = None
+
     gate = evaluate_human_review_gate(
         repository=args.repository,
         pull_request_number=args.pull_request,
