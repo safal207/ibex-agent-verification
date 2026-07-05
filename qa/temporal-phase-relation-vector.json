@@ -1,0 +1,63 @@
+{
+  "expected": {
+    "@context": "urn:ibex-agent-verification:temporal-phase-relation:v1",
+    "source": {
+      "artifact_id": "pr-head:69",
+      "artifact_type": "git-commit",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "target": {
+      "artifact_id": "review:9001",
+      "artifact_type": "human-review-receipt",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "relation_type": "APPROVAL_SUPPORTS_HEAD",
+    "transition_id": "transition:merge-candidate:69",
+    "expected_phase": "PRE_MERGE",
+    "valid_from": "2026-07-05T10:00:00Z",
+    "valid_until": "2026-07-05T11:00:00Z",
+    "evidence_max_age_seconds": 900,
+    "expected_outcome": {
+      "status": "APPROVED",
+      "head_bound": true
+    },
+    "evidence_refs": [
+      {
+        "ref": "github://review/9001",
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "captured_at": "2026-07-05T10:20:00Z"
+      }
+    ]
+  },
+  "observed": {
+    "@context": "urn:ibex-agent-verification:transition-observation:v1",
+    "source": {
+      "artifact_id": "pr-head:69",
+      "artifact_type": "git-commit",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "target": {
+      "artifact_id": "review:9001",
+      "artifact_type": "human-review-receipt",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "relation_type": "APPROVAL_SUPPORTS_HEAD",
+    "transition_id": "transition:merge-candidate:69",
+    "observed_phase": "PRE_MERGE",
+    "observed_at": "2026-07-05T10:30:00Z",
+    "observed_outcome": {
+      "status": "APPROVED",
+      "head_bound": true
+    },
+    "evidence_refs": [
+      {
+        "ref": "github://review/9001",
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "captured_at": "2026-07-05T10:20:00Z"
+      }
+    ]
+  },
+  "expected_relation_id": "sha256:cfdf61c875a3122722337da4c37991e33cf3c4697d76be5112f83b89655feb5a",
+  "observed_relation_id": "sha256:01f8696075bbfa97925fcf95f14f9ef2cac77fa571047339955472b672a9fd6a",
+  "comparison_id": "sha256:40666bd40e23fcc4ef1cad65a9a062ab5fd07b9f8c2351331c8d0c033c4781a7"
+}
