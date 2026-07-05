@@ -8,9 +8,10 @@ not permission to execute or merge.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .canonical_json import CanonicalizationError, canonicalize_jcs, sha256_jcs
@@ -314,9 +315,10 @@ def _stale_evidence(
     max_age_seconds: int,
 ) -> list[dict[str, Any]]:
     mismatches: list[dict[str, Any]] = []
+    freshness_limit = timedelta(seconds=max_age_seconds)
     for evidence in refs:
         captured_at = _parse_utc(evidence["captured_at"], "captured_at")
-        age_seconds = int((observed_at - captured_at).total_seconds())
+        age = observed_at - captured_at
         if captured_at > observed_at:
             mismatches.append(
                 {
@@ -325,13 +327,13 @@ def _stale_evidence(
                     "reason": "evidence was captured after the observation",
                 }
             )
-        elif age_seconds > max_age_seconds:
+        elif age > freshness_limit:
             mismatches.append(
                 {
                     "field": "evidence_refs",
                     "ref": evidence["ref"],
                     "reason": "evidence exceeded the declared freshness window",
-                    "age_seconds": age_seconds,
+                    "age_seconds": math.ceil(age.total_seconds()),
                     "max_age_seconds": max_age_seconds,
                 }
             )
