@@ -1,0 +1,191 @@
+{
+  "contract": "IBEX-VERIFY-GRAPH-001",
+  "version": 1,
+  "authority": "verification-plan-only",
+  "defaultDepth": "L3",
+  "depthOrder": [
+    "L1",
+    "L2",
+    "L3",
+    "L4"
+  ],
+  "pathRules": [
+    {
+      "depth": "L4",
+      "reason": "trusted workflow, release, attestation, or privileged transition surface",
+      "patterns": [
+        ".github/workflows/*",
+        "proofqa/action.yml",
+        "scripts/publish_*",
+        "scripts/*attestation*",
+        "scripts/trusted_transition_*",
+        "scripts/production_transition_source.py",
+        "scripts/*deployment*",
+        "scripts/*release*"
+      ]
+    },
+    {
+      "depth": "L3",
+      "reason": "governance, schema, canonicalization, evidence, or authority boundary",
+      "patterns": [
+        "qa/*",
+        "schemas/*",
+        "conformance/*",
+        "src/ibex_agent_verification/action_chain.py",
+        "src/ibex_agent_verification/canonical_json.py",
+        "src/ibex_agent_verification/schema_validation.py",
+        "src/ibex_agent_verification/verifier_depth.py",
+        "src/ibex_agent_verification/verification_graph.py",
+        "src/ibex_agent_verification/schemas/*",
+        "scripts/ibex_verification_graph.py",
+        "tests/test_verification_graph.py"
+      ]
+    },
+    {
+      "depth": "L2",
+      "reason": "runtime, adapter, test, fixture, or executable behavior",
+      "patterns": [
+        "src/*",
+        "src/**/*",
+        "tests/*",
+        "tests/**/*",
+        "examples/*",
+        "examples/**/*",
+        "proofqa/*",
+        "proofqa/**/*",
+        "scripts/*"
+      ]
+    },
+    {
+      "depth": "L1",
+      "reason": "documentation-only or repository metadata change",
+      "patterns": [
+        "docs/*",
+        "docs/**/*",
+        "README.md",
+        "LICENSE",
+        "*.md"
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "exact_head",
+      "label": "Exact PR head",
+      "kind": "evidence",
+      "job": "Exact head binding",
+      "minimumDepth": "L1",
+      "execution": "ci"
+    },
+    {
+      "id": "graph_contract",
+      "label": "Graph policy self-test",
+      "kind": "contract",
+      "job": "Graph contract",
+      "minimumDepth": "L1",
+      "execution": "ci"
+    },
+    {
+      "id": "python_contract_suite",
+      "label": "Complete Python contract suite",
+      "kind": "verification",
+      "job": "Python contract suite",
+      "minimumDepth": "L1",
+      "execution": "ci"
+    },
+    {
+      "id": "schema_vectors",
+      "label": "Schema parity and vector recomputation",
+      "kind": "verification",
+      "job": "Schema and vectors",
+      "minimumDepth": "L2",
+      "execution": "ci"
+    },
+    {
+      "id": "authority_invariants",
+      "label": "Fail-closed authority invariants",
+      "kind": "verification",
+      "job": "Authority invariants",
+      "minimumDepth": "L2",
+      "execution": "ci"
+    },
+    {
+      "id": "installed_wheel",
+      "label": "Installed-wheel runtime boundary",
+      "kind": "verification",
+      "job": "Installed wheel",
+      "minimumDepth": "L3",
+      "execution": "ci"
+    },
+    {
+      "id": "workflow_security",
+      "label": "Workflow security boundary",
+      "kind": "security",
+      "job": "Workflow security",
+      "minimumDepth": "L4",
+      "execution": "ci"
+    },
+    {
+      "id": "human_review",
+      "label": "Binding maintainer review",
+      "kind": "governance",
+      "job": "External human gate",
+      "minimumDepth": "L3",
+      "execution": "external"
+    }
+  ],
+  "edges": [
+    [
+      "changed_paths",
+      "depth_decision"
+    ],
+    [
+      "depth_decision",
+      "exact_head"
+    ],
+    [
+      "depth_decision",
+      "graph_contract"
+    ],
+    [
+      "depth_decision",
+      "python_contract_suite"
+    ],
+    [
+      "exact_head",
+      "schema_vectors"
+    ],
+    [
+      "graph_contract",
+      "schema_vectors"
+    ],
+    [
+      "python_contract_suite",
+      "authority_invariants"
+    ],
+    [
+      "schema_vectors",
+      "installed_wheel"
+    ],
+    [
+      "authority_invariants",
+      "installed_wheel"
+    ],
+    [
+      "installed_wheel",
+      "workflow_security"
+    ],
+    [
+      "installed_wheel",
+      "human_review"
+    ],
+    [
+      "workflow_security",
+      "final_verdict"
+    ],
+    [
+      "human_review",
+      "final_verdict"
+    ]
+  ]
+}
