@@ -24,7 +24,12 @@ def main() -> int:
 
     expected_comparison_id = vector.get("comparison_id")
     if expected_comparison_id and result["comparison_id"] != expected_comparison_id:
-        raise SystemExit("published comparison_id does not recompute")
+        details = {
+            "error": "published comparison_id does not recompute",
+            "expected": expected_comparison_id,
+            "recomputed": result["comparison_id"],
+        }
+        raise SystemExit(json.dumps(details, sort_keys=True))
     return 0 if result["status"] == "MATCH" else 1
 
 
