@@ -16,6 +16,14 @@ from ibex_agent_verification.verification_graph import (
     render_summary,
 )
 
+_WORKFLOW_NODE_OUTPUTS = {
+    "require_schema": "schema_vectors",
+    "require_authority": "authority_invariants",
+    "require_wheel": "installed_wheel",
+    "require_workflow_security": "workflow_security",
+}
+_EXTERNAL_GATE_NODE = "human_review"
+
 
 def _write_json(path: str | Path, value: Any) -> None:
     output = Path(path)
@@ -34,16 +42,39 @@ def _write_summary(path: str | Path | None, value: dict[str, Any]) -> None:
 def _write_github_outputs(path: str | Path | None, plan: dict[str, Any]) -> None:
     if path is None:
         return
-    depth = plan["decision"]["depth"]
-    required = set(plan["decision"]["required_ci_nodes"])
+
+    node_by_id = {node["id"]: node for node in plan["graph"]["nodes"]}
+    expected_node_ids = set(_WORKFLOW_NODE_OUTPUTS.values()) | {_EXTERNAL_GATE_NODE}
+    missing_node_ids = sorted(expected_node_ids - set(node_by_id))
+    if missing_node_ids:
+        raise ValueError(
+            "verification policy is incompatible with workflow outputs; "
+            f"missing nodes: {missing_node_ids}"
+        )
+
+    invalid_execution = sorted(
+        node_id
+        for node_id in _WORKFLOW_NODE_OUTPUTS.values()
+        if node_by_id[node_id]["execution"] != "ci"
+    )
+    if node_by_id[_EXTERNAL_GATE_NODE]["execution"] != "external":
+        invalid_execution.append(_EXTERNAL_GATE_NODE)
+    if invalid_execution:
+        raise ValueError(
+            "verification policy has incompatible workflow node execution classes: "
+            f"{invalid_execution}"
+        )
+
+    required_ci = set(plan["decision"]["required_ci_nodes"])
+    required_external = set(plan["decision"]["required_external_nodes"])
     pairs = {
-        "depth": depth,
+        "depth": plan["decision"]["depth"],
         "changed_count": str(plan["source"]["changed_file_count"]),
-        "require_schema": str("schema_vectors" in required).lower(),
-        "require_authority": str("authority_invariants" in required).lower(),
-        "require_wheel": str("installed_wheel" in required).lower(),
-        "require_workflow_security": str("workflow_security" in required).lower(),
-        "require_human": str(bool(plan["decision"]["required_external_nodes"])).lower(),
+        **{
+            output_name: str(node_id in required_ci).lower()
+            for output_name, node_id in _WORKFLOW_NODE_OUTPUTS.items()
+        },
+        "require_human": str(_EXTERNAL_GATE_NODE in required_external).lower(),
     }
     with Path(path).open("a", encoding="utf-8") as handle:
         for key, value in pairs.items():
