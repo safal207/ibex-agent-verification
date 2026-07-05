@@ -35,25 +35,21 @@ jobs:
       - name: Install exact-head runtime
         run: python -m pip install -e . pytest==8.4.1
 
-      - name: Run temporal, phase, freshness and outcome regressions
+      - name: Run temporal, phase, freshness and live-observation regressions
         run: |
           mkdir -p artifacts
-          python -m pytest -q tests/test_temporal_phase_relations.py \
+          python -m pytest -q \
+            tests/test_temporal_phase_relations.py \
+            tests/test_live_checkout_relation.py \
             --junitxml=artifacts/temporal-phase-relations.xml
 
       - name: Recompute published expected/observed comparison
-        env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          set -euo pipefail
-          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$(git rev-parse HEAD)" == "$EXPECTED_HEAD" ]]
           python scripts/ibex_temporal_phase_relation.py \
             --vector qa/temporal-phase-relation-vector.json \
             --output artifacts/temporal-phase-comparison.json
           python - <<'PY'
           import json
-          import os
           from pathlib import Path
 
           comparison = json.loads(
@@ -62,19 +58,40 @@ jobs:
           assert comparison["status"] == "MATCH"
           assert comparison["transition_supported"] is True
           assert comparison["transition_authorized"] is False
-          Path("artifacts/exact-head.json").write_text(
-              json.dumps(
-                  {
-                      "head_sha": os.environ["EXPECTED_HEAD"],
-                      "comparison_id": comparison["comparison_id"],
-                      "transition_authorized": False,
-                  },
-                  indent=2,
-                  sort_keys=True,
-              )
-              + "\n",
-              encoding="utf-8",
+          PY
+
+      - name: Compare declared PR head with observed runner checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          TRANSITION_ID: workflow-run:${{ github.run_id }}:${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          ACTUAL_HEAD="$(git rev-parse HEAD)"
+          OBSERVED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if git diff --quiet && git diff --cached --quiet; then
+            CLEAN=true
+          else
+            CLEAN=false
+          fi
+          python scripts/ibex_observe_checkout_relation.py \
+            --expected-head "$EXPECTED_HEAD" \
+            --actual-head "$ACTUAL_HEAD" \
+            --transition-id "$TRANSITION_ID" \
+            --observed-at "$OBSERVED_AT" \
+            --clean "$CLEAN" \
+            --output artifacts/live-checkout-relation.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          bundle = json.loads(
+              Path("artifacts/live-checkout-relation.json").read_text(encoding="utf-8")
           )
+          comparison = bundle["comparison"]
+          assert comparison["status"] == "MATCH"
+          assert comparison["transition_supported"] is True
+          assert comparison["transition_authorized"] is False
           PY
 
       - name: Publish relation evidence
