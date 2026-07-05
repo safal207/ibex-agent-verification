@@ -271,6 +271,7 @@ def audit_workflow(path: str | Path) -> dict[str, Any]:
         if not stripped.startswith("uses:"):
             continue
         action_ref = stripped.removeprefix("uses:").strip()
+        action_ref = re.sub(r"\s+#.*$", "", action_ref).rstrip()
         if action_ref.startswith("./"):
             continue
         if _ACTION_PIN.fullmatch(action_ref) is None:
