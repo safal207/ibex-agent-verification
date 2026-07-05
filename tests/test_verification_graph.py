@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,7 +17,17 @@ from ibex_agent_verification.verification_graph import (
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "qa/ibex-verification-graph.json"
 WORKFLOW_PATH = ROOT / ".github/workflows/ibex-verification-graph.yml"
+CLI_PATH = ROOT / "scripts/ibex_verification_graph.py"
 HEAD = "a" * 40
+
+
+def _load_cli_module():
+    spec = importlib.util.spec_from_file_location("ibex_verification_graph_cli", CLI_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("unable to load verification graph CLI")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class VerificationGraphPolicyTests(unittest.TestCase):
@@ -118,6 +129,50 @@ class VerificationGraphVerdictTests(unittest.TestCase):
             finalize_plan(self.plan, {"exact_head": "maybe"})
 
 
+class VerificationGraphCliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _load_cli_module()
+        self.policy = load_policy(POLICY_PATH)
+
+    def test_github_outputs_follow_required_plan_nodes(self) -> None:
+        plan = build_plan(
+            ["src/ibex_agent_verification/action_chain.py"],
+            HEAD,
+            self.policy,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "github-output.txt"
+            self.cli._write_github_outputs(output, plan)
+            values = dict(
+                line.split("=", 1)
+                for line in output.read_text(encoding="utf-8").splitlines()
+            )
+        self.assertEqual(values["depth"], "L3")
+        self.assertEqual(values["require_schema"], "true")
+        self.assertEqual(values["require_authority"], "true")
+        self.assertEqual(values["require_wheel"], "true")
+        self.assertEqual(values["require_workflow_security"], "false")
+        self.assertEqual(values["require_human"], "true")
+
+    def test_node_rename_fails_closed_instead_of_skipping_gate(self) -> None:
+        plan = build_plan(
+            ["src/ibex_agent_verification/action_chain.py"],
+            HEAD,
+            self.policy,
+        )
+        for node in plan["graph"]["nodes"]:
+            if node["id"] == "schema_vectors":
+                node["id"] = "schema_vectors_v2"
+        plan["decision"]["required_ci_nodes"] = [
+            "schema_vectors_v2" if node_id == "schema_vectors" else node_id
+            for node_id in plan["decision"]["required_ci_nodes"]
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "github-output.txt"
+            with self.assertRaisesRegex(ValueError, "missing nodes"):
+                self.cli._write_github_outputs(output, plan)
+
+
 class VerificationGraphWorkflowTests(unittest.TestCase):
     def test_repository_workflow_passes_security_audit(self) -> None:
         report = audit_workflow(WORKFLOW_PATH)
@@ -145,6 +200,33 @@ jobs:
         self.assertTrue(
             any("not pinned" in finding for finding in report["findings"])
         )
+
+    def test_pinned_action_with_inline_comment_is_accepted(self) -> None:
+        safe = """
+on:
+  pull_request:
+permissions: {}
+concurrency:
+  group: ibex-verification-graph-${{ github.event.pull_request.number || github.ref }}
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - run: echo merge_authorized=false
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "workflow.yml"
+            path.write_text(safe, encoding="utf-8")
+            report = audit_workflow(path)
+        self.assertEqual(report, {
+            "workflow": path.as_posix(),
+            "status": "PASS",
+            "findings": [],
+        })
 
 
 if __name__ == "__main__":
