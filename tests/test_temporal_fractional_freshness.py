@@ -26,10 +26,13 @@ class FractionalEvidenceFreshnessTests(unittest.TestCase):
         )
 
         result = compare_expected_to_observed(expected, observed)
+        mismatch = result["mismatches"][0]
 
         self.assertEqual(result["status"], STALE_EVIDENCE)
-        self.assertEqual(result["mismatches"][0]["age_seconds"], 6)
-        self.assertEqual(result["mismatches"][0]["max_age_seconds"], 5)
+        self.assertEqual(mismatch["field"], "evidence_refs")
+        self.assertEqual(mismatch["ref"], "github://review/9001")
+        self.assertEqual(mismatch["age_seconds"], 6)
+        self.assertEqual(mismatch["max_age_seconds"], 5)
 
 
 if __name__ == "__main__":
