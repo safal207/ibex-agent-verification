@@ -1,0 +1,4 @@
+name: Ibex Temporal Phase Relations
+
+on:
+  workflow_dispatch:
