@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ibex-agent-verification.dev/schemas/expected_observed_transition_comparison_v1.schema.json",
+  "title": "ExpectedObservedTransitionComparisonV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "@context",
+    "comparison_id",
+    "expected_relation_id",
+    "observed_relation_id",
+    "status",
+    "transition_supported",
+    "transition_authorized",
+    "blocking",
+    "mismatches",
+    "permitted_next_transition"
+  ],
+  "properties": {
+    "@context": {
+      "const": "urn:ibex-agent-verification:expected-observed-transition-comparison:v1"
+    },
+    "comparison_id": { "$ref": "#/$defs/digest" },
+    "expected_relation_id": {
+      "oneOf": [
+        { "$ref": "#/$defs/digest" },
+        { "type": "null" }
+      ]
+    },
+    "observed_relation_id": {
+      "oneOf": [
+        { "$ref": "#/$defs/digest" },
+        { "type": "null" }
+      ]
+    },
+    "status": {
+      "enum": [
+        "MATCH",
+        "MISSING_OBSERVATION",
+        "IDENTITY_MISMATCH",
+        "PHASE_MISMATCH",
+        "TEMPORAL_MISMATCH",
+        "STALE_EVIDENCE",
+        "OUTCOME_DEVIATION",
+        "NON_RECOMPUTABLE"
+      ]
+    },
+    "transition_supported": { "type": "boolean" },
+    "transition_authorized": { "const": false },
+    "blocking": { "type": "boolean" },
+    "mismatches": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "permitted_next_transition": {
+      "enum": ["EVALUATE_POLICY_GATE", "BLOCK_AND_RECONCILE"]
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "artifact_type", "digest"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_type": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "evidence_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "digest", "captured_at"],
+      "properties": {
+        "ref": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/$defs/digest" },
+        "captured_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "temporal_phase_relation_v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "@context",
+        "source",
+        "target",
+        "relation_type",
+        "transition_id",
+        "expected_phase",
+        "valid_from",
+        "valid_until",
+        "evidence_max_age_seconds",
+        "expected_outcome",
+        "evidence_refs"
+      ],
+      "properties": {
+        "@context": {
+          "const": "urn:ibex-agent-verification:temporal-phase-relation:v1"
+        },
+        "source": { "$ref": "#/$defs/artifact" },
+        "target": { "$ref": "#/$defs/artifact" },
+        "relation_type": { "type": "string", "minLength": 1 },
+        "transition_id": { "type": "string", "minLength": 1 },
+        "expected_phase": { "type": "string", "minLength": 1 },
+        "valid_from": { "type": "string", "format": "date-time" },
+        "valid_until": { "type": "string", "format": "date-time" },
+        "evidence_max_age_seconds": { "type": "integer", "minimum": 0 },
+        "expected_outcome": { "type": "object" },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence_ref" }
+        }
+      }
+    },
+    "transition_observation_v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "@context",
+        "source",
+        "target",
+        "relation_type",
+        "transition_id",
+        "observed_phase",
+        "observed_at",
+        "observed_outcome",
+        "evidence_refs"
+      ],
+      "properties": {
+        "@context": {
+          "const": "urn:ibex-agent-verification:transition-observation:v1"
+        },
+        "source": { "$ref": "#/$defs/artifact" },
+        "target": { "$ref": "#/$defs/artifact" },
+        "relation_type": { "type": "string", "minLength": 1 },
+        "transition_id": { "type": "string", "minLength": 1 },
+        "observed_phase": { "type": "string", "minLength": 1 },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "observed_outcome": { "type": "object" },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence_ref" }
+        }
+      }
+    }
+  }
+}
