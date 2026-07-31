@@ -11,7 +11,7 @@ from verify_proofpath_poci_consumer import (  # noqa: E402
     CELLS_DOMAIN,
     MULTIGRAPH_PROFILE,
     POLICY_PROFILE,
-    PRODUCER_REPORT_PROFILE if False else REPORT_PROFILE,
+    REPORT_PROFILE,
     REQUIRED_GRAPHS,
     SOURCE_DOMAIN,
     digest,
