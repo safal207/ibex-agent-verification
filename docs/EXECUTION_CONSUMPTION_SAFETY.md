@@ -6,7 +6,7 @@ This is a framework-neutral reference contract for classifying how far execution
 
 ## Invariant: Authority follows atomicity
 
-A component may claim grant-consumption authority only to the extent that it can atomically bind consumption to the commitment that causes dispatch, or the final side-effect endpoint enforces an equivalent stable use token idempotently.
+A component may claim grant-consumption authority only to the extent that it can atomically bind consumption to the commitment that causes dispatch, or the final side-effect endpoint enforces an equivalent occurrence-bound stable use token idempotently.
 
 Authorization alone is not exclusive execution.
 
@@ -49,7 +49,7 @@ The closed v1 profile defines:
 | `local_atomic` | consumption and dispatch commitment share one local atomic boundary | `SINGLE_INSTANCE` |
 | `shared_atomic` | competing executors share an atomic consumption/dispatch boundary | `ATOMIC` |
 | `outbox_atomic` | consume and enqueue/commit-dispatch occur in the same atomic transaction | `ATOMIC` |
-| `tool_idempotent` | the final endpoint enforces a stable use token | `IDEMPOTENT_ENDPOINT` |
+| `tool_idempotent` | the final endpoint enforces an occurrence-bound stable use token | `IDEMPOTENT_ENDPOINT` |
 
 ### Local atomicity is deployment-scoped
 
@@ -76,12 +76,15 @@ A shared ledger closes the gap only when the ledger transaction also commits the
 
 ### Endpoint idempotency
 
-When no shared transaction can span the external side effect, the final endpoint can own replay enforcement. `tool_idempotent` requires both:
+When no shared transaction can span the external side effect, the final endpoint can own replay enforcement. `tool_idempotent` requires all three:
 
-1. a stable non-empty `use_token` bound to the authorized occurrence; and
-2. explicit evidence that the endpoint enforces that token idempotently.
+1. a stable non-empty `use_token`;
+2. evidence that the token is bound to the exact authorized grant/occurrence (`use_token_bound: true`); and
+3. explicit evidence that the endpoint enforces that token idempotently.
 
-A token without enforcement is only advisory evidence. Enforcement without a token has nothing stable to deduplicate.
+A caller-generated token that can differ per retry or per worker does not close the race: two competing executors could choose different keys and both side effects could succeed. Such a record returns `REPLAY_PROTECTION_UNPROVEN` with `USE_TOKEN_BINDING_UNPROVEN`.
+
+A bound token without endpoint enforcement is also only advisory evidence. Enforcement without a token has nothing stable to deduplicate.
 
 ## Machine-readable record
 
@@ -93,16 +96,32 @@ A token without enforcement is only advisory evidence. Enforcement without a tok
   "executor_scope": "multi_instance",
   "dispatch_commitment_bound": true,
   "use_token": null,
+  "use_token_bound": false,
   "endpoint_idempotency_enforced": false
 }
 ```
 
 The record is closed: missing and unknown fields fail rather than being guessed.
 
+For an endpoint-owned replay boundary, a safe-shaped record instead requires:
+
+```json
+{
+  "execution_binding": "external",
+  "consumption_authority": "tool-endpoint",
+  "consumption_mode": "tool_idempotent",
+  "executor_scope": "multi_instance",
+  "dispatch_commitment_bound": false,
+  "use_token": "grant-42:occurrence-7",
+  "use_token_bound": true,
+  "endpoint_idempotency_enforced": true
+}
+```
+
 ## Verdicts
 
 - `EXECUTION_SAFE`: the supplied evidence supports the mode-specific replay-safety claim.
-- `REPLAY_PROTECTION_UNPROVEN`: some protection exists, but the topology or enforcement evidence does not support exclusive execution.
+- `REPLAY_PROTECTION_UNPROVEN`: some protection exists, but topology, token binding, or enforcement evidence does not support exclusive execution.
 - `NOT_EXECUTION_SAFE`: the claimed atomic mechanism leaves dispatch outside the atomic boundary.
 - `USE_TOKEN_REQUIRED`: endpoint-idempotency mode lacks the stable occurrence token needed for enforcement.
 
@@ -130,11 +149,12 @@ They lock at least these boundaries:
 4. atomic shared-ledger consume followed by separate HTTP dispatch → not execution safe;
 5. outbox consume + enqueue in one transaction → atomic execution commitment;
 6. endpoint idempotency without a use token → token required;
-7. endpoint idempotency with a stable token and enforcement evidence → execution safe.
+7. endpoint idempotency with an unbound caller-generated token → replay protection unproven;
+8. endpoint idempotency with an occurrence-bound stable token and enforcement evidence → execution safe.
 
 ## Claim boundary
 
-`verify_execution_safety()` is a deterministic classifier over supplied evidence. It does **not** prove that a database transaction, queue, endpoint, or CrewAI runtime actually has the declared atomicity or idempotency properties. Those properties require separately captured implementation/runtime evidence.
+`verify_execution_safety()` is a deterministic classifier over supplied evidence. It does **not** prove that a database transaction, queue, token derivation, endpoint, or CrewAI runtime actually has the declared atomicity, binding, or idempotency properties. Those properties require separately captured implementation/runtime evidence.
 
 Likewise, `EXECUTION_SAFE` does not prove that the side effect succeeded or produced the intended result. Outcome remains a separate observed record.
 
@@ -146,4 +166,4 @@ permission proof
   ≠ side-effect outcome proof
 ```
 
-This separation is deliberate: verification proves permission; atomic consumption proves exclusive use within its stated scope; observed outcome proves what actually happened.
+This separation is deliberate: verification proves permission; atomic consumption or occurrence-bound endpoint idempotency proves exclusive use within its stated scope; observed outcome proves what actually happened.
