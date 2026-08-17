@@ -56,6 +56,7 @@ _BINDING_FIELDS = (
     "executor_scope",
     "dispatch_commitment_bound",
     "use_token",
+    "use_token_bound",
     "endpoint_idempotency_enforced",
 )
 _EXECUTION_BINDINGS = frozenset({"internal", "external"})
@@ -69,6 +70,11 @@ class ConsumptionBinding:
     the commitment that causes dispatch are one atomic unit. A separately
     issued HTTP/tool dispatch must therefore set it to ``False`` even when the
     ledger's own consume operation is atomic.
+
+    ``use_token_bound`` means the stable endpoint idempotency token is derived
+    from, or otherwise cryptographically/structurally bound to, the exact
+    authorized grant occurrence. A caller-chosen fresh token per retry cannot
+    provide replay protection across competing executors.
     """
 
     execution_binding: str
@@ -77,6 +83,7 @@ class ConsumptionBinding:
     executor_scope: ExecutorScope
     dispatch_commitment_bound: bool
     use_token: str | None
+    use_token_bound: bool
     endpoint_idempotency_enforced: bool
 
     @classmethod
@@ -95,7 +102,7 @@ class ConsumptionBinding:
             raise ValueError(f"consumption binding contains unknown fields: {unknown}")
 
         execution_binding = value["execution_binding"]
-        if execution_binding not in _EXECUTION_BINDINGS:
+        if not isinstance(execution_binding, str) or execution_binding not in _EXECUTION_BINDINGS:
             raise ValueError("execution_binding must be 'internal' or 'external'")
 
         consumption_authority = value["consumption_authority"]
@@ -116,15 +123,19 @@ class ConsumptionBinding:
         if not isinstance(dispatch_commitment_bound, bool):
             raise ValueError("dispatch_commitment_bound must be boolean")
 
-        endpoint_idempotency_enforced = value["endpoint_idempotency_enforced"]
-        if not isinstance(endpoint_idempotency_enforced, bool):
-            raise ValueError("endpoint_idempotency_enforced must be boolean")
-
         use_token = value["use_token"]
         if use_token is not None and (
             not isinstance(use_token, str) or not use_token
         ):
             raise ValueError("use_token must be null or a non-empty string")
+
+        use_token_bound = value["use_token_bound"]
+        if not isinstance(use_token_bound, bool):
+            raise ValueError("use_token_bound must be boolean")
+
+        endpoint_idempotency_enforced = value["endpoint_idempotency_enforced"]
+        if not isinstance(endpoint_idempotency_enforced, bool):
+            raise ValueError("endpoint_idempotency_enforced must be boolean")
 
         return cls(
             execution_binding=execution_binding,
@@ -133,6 +144,7 @@ class ConsumptionBinding:
             executor_scope=executor_scope,
             dispatch_commitment_bound=dispatch_commitment_bound,
             use_token=use_token,
+            use_token_bound=use_token_bound,
             endpoint_idempotency_enforced=endpoint_idempotency_enforced,
         )
 
@@ -152,7 +164,7 @@ def verify_execution_safety(binding: ConsumptionBinding) -> ExecutionSafetyResul
     The central invariant is ``Authority follows atomicity``: the component
     claiming consumption authority must be able to bind grant consumption to
     dispatch commitment in one atomic boundary, unless the final endpoint
-    enforces the same stable use token idempotently.
+    enforces the same occurrence-bound stable use token idempotently.
     """
 
     if not isinstance(binding, ConsumptionBinding):
@@ -173,6 +185,12 @@ def verify_execution_safety(binding: ConsumptionBinding) -> ExecutionSafetyResul
                 ExecutionSafetyVerdict.USE_TOKEN_REQUIRED,
                 ExecutionGuarantee.NONE,
                 "USE_TOKEN_REQUIRED",
+            )
+        if not binding.use_token_bound:
+            return ExecutionSafetyResult(
+                ExecutionSafetyVerdict.REPLAY_PROTECTION_UNPROVEN,
+                ExecutionGuarantee.ADVISORY,
+                "USE_TOKEN_BINDING_UNPROVEN",
             )
         if not binding.endpoint_idempotency_enforced:
             return ExecutionSafetyResult(
