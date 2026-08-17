@@ -11,6 +11,7 @@
         "executor_scope": "multi_instance",
         "dispatch_commitment_bound": false,
         "use_token": null,
+        "use_token_bound": false,
         "endpoint_idempotency_enforced": false
       },
       "expected": {
@@ -28,6 +29,7 @@
         "executor_scope": "single_instance",
         "dispatch_commitment_bound": true,
         "use_token": null,
+        "use_token_bound": false,
         "endpoint_idempotency_enforced": false
       },
       "expected": {
@@ -45,6 +47,7 @@
         "executor_scope": "multi_instance",
         "dispatch_commitment_bound": true,
         "use_token": null,
+        "use_token_bound": false,
         "endpoint_idempotency_enforced": false
       },
       "expected": {
@@ -62,6 +65,7 @@
         "executor_scope": "multi_instance",
         "dispatch_commitment_bound": false,
         "use_token": null,
+        "use_token_bound": false,
         "endpoint_idempotency_enforced": false
       },
       "expected": {
@@ -79,6 +83,7 @@
         "executor_scope": "multi_instance",
         "dispatch_commitment_bound": true,
         "use_token": null,
+        "use_token_bound": false,
         "endpoint_idempotency_enforced": false
       },
       "expected": {
@@ -96,6 +101,7 @@
         "executor_scope": "multi_instance",
         "dispatch_commitment_bound": false,
         "use_token": null,
+        "use_token_bound": false,
         "endpoint_idempotency_enforced": true
       },
       "expected": {
@@ -105,7 +111,25 @@
       }
     },
     {
-      "name": "tool-idempotency-stable-use-token",
+      "name": "tool-idempotency-unbound-use-token",
+      "binding": {
+        "execution_binding": "external",
+        "consumption_authority": "tool-endpoint",
+        "consumption_mode": "tool_idempotent",
+        "executor_scope": "multi_instance",
+        "dispatch_commitment_bound": false,
+        "use_token": "caller-generated-retry-token",
+        "use_token_bound": false,
+        "endpoint_idempotency_enforced": true
+      },
+      "expected": {
+        "verdict": "REPLAY_PROTECTION_UNPROVEN",
+        "guarantee": "ADVISORY",
+        "reason_code": "USE_TOKEN_BINDING_UNPROVEN"
+      }
+    },
+    {
+      "name": "tool-idempotency-occurrence-bound-use-token",
       "binding": {
         "execution_binding": "external",
         "consumption_authority": "tool-endpoint",
@@ -113,6 +137,7 @@
         "executor_scope": "multi_instance",
         "dispatch_commitment_bound": false,
         "use_token": "grant-42:occurrence-7",
+        "use_token_bound": true,
         "endpoint_idempotency_enforced": true
       },
       "expected": {
