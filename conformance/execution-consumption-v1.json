@@ -1,0 +1,125 @@
+{
+  "profile": "execution-consumption-v1",
+  "invariant": "Authority follows atomicity",
+  "cases": [
+    {
+      "name": "advisory-ledger-check-then-separate-dispatch",
+      "binding": {
+        "execution_binding": "external",
+        "consumption_authority": "shared-ledger",
+        "consumption_mode": "advisory_only",
+        "executor_scope": "multi_instance",
+        "dispatch_commitment_bound": false,
+        "use_token": null,
+        "endpoint_idempotency_enforced": false
+      },
+      "expected": {
+        "verdict": "REPLAY_PROTECTION_UNPROVEN",
+        "guarantee": "ADVISORY",
+        "reason_code": "ADVISORY_CHECK_THEN_ACT"
+      }
+    },
+    {
+      "name": "local-atomic-single-instance",
+      "binding": {
+        "execution_binding": "internal",
+        "consumption_authority": "crew-core",
+        "consumption_mode": "local_atomic",
+        "executor_scope": "single_instance",
+        "dispatch_commitment_bound": true,
+        "use_token": null,
+        "endpoint_idempotency_enforced": false
+      },
+      "expected": {
+        "verdict": "EXECUTION_SAFE",
+        "guarantee": "SINGLE_INSTANCE",
+        "reason_code": "LOCAL_CONSUME_AND_DISPATCH_ATOMIC"
+      }
+    },
+    {
+      "name": "local-atomic-multi-worker",
+      "binding": {
+        "execution_binding": "internal",
+        "consumption_authority": "worker-local-state",
+        "consumption_mode": "local_atomic",
+        "executor_scope": "multi_instance",
+        "dispatch_commitment_bound": true,
+        "use_token": null,
+        "endpoint_idempotency_enforced": false
+      },
+      "expected": {
+        "verdict": "REPLAY_PROTECTION_UNPROVEN",
+        "guarantee": "SINGLE_INSTANCE",
+        "reason_code": "LOCAL_STATE_NO_CROSS_INSTANCE_PROTECTION"
+      }
+    },
+    {
+      "name": "shared-ledger-consume-then-separate-http-dispatch",
+      "binding": {
+        "execution_binding": "external",
+        "consumption_authority": "shared-ledger",
+        "consumption_mode": "shared_atomic",
+        "executor_scope": "multi_instance",
+        "dispatch_commitment_bound": false,
+        "use_token": null,
+        "endpoint_idempotency_enforced": false
+      },
+      "expected": {
+        "verdict": "NOT_EXECUTION_SAFE",
+        "guarantee": "NONE",
+        "reason_code": "DISPATCH_OUTSIDE_ATOMIC_BOUNDARY"
+      }
+    },
+    {
+      "name": "outbox-consume-and-enqueue-same-transaction",
+      "binding": {
+        "execution_binding": "external",
+        "consumption_authority": "dispatch-ledger",
+        "consumption_mode": "outbox_atomic",
+        "executor_scope": "multi_instance",
+        "dispatch_commitment_bound": true,
+        "use_token": null,
+        "endpoint_idempotency_enforced": false
+      },
+      "expected": {
+        "verdict": "EXECUTION_SAFE",
+        "guarantee": "ATOMIC",
+        "reason_code": "ATOMIC_CONSUME_AND_DISPATCH_COMMIT"
+      }
+    },
+    {
+      "name": "tool-idempotency-without-use-token",
+      "binding": {
+        "execution_binding": "external",
+        "consumption_authority": "tool-endpoint",
+        "consumption_mode": "tool_idempotent",
+        "executor_scope": "multi_instance",
+        "dispatch_commitment_bound": false,
+        "use_token": null,
+        "endpoint_idempotency_enforced": true
+      },
+      "expected": {
+        "verdict": "USE_TOKEN_REQUIRED",
+        "guarantee": "NONE",
+        "reason_code": "USE_TOKEN_REQUIRED"
+      }
+    },
+    {
+      "name": "tool-idempotency-stable-use-token",
+      "binding": {
+        "execution_binding": "external",
+        "consumption_authority": "tool-endpoint",
+        "consumption_mode": "tool_idempotent",
+        "executor_scope": "multi_instance",
+        "dispatch_commitment_bound": false,
+        "use_token": "grant-42:occurrence-7",
+        "endpoint_idempotency_enforced": true
+      },
+      "expected": {
+        "verdict": "EXECUTION_SAFE",
+        "guarantee": "IDEMPOTENT_ENDPOINT",
+        "reason_code": "ENDPOINT_IDEMPOTENCY_ENFORCED"
+      }
+    }
+  ]
+}
