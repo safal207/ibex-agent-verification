@@ -40,6 +40,7 @@ class ExecutionSafetyTests(unittest.TestCase):
                 "executor_scope": "multi_instance",
                 "dispatch_commitment_bound": True,
                 "use_token": None,
+                "use_token_bound": False,
                 "endpoint_idempotency_enforced": False,
             }
         )
@@ -65,6 +66,7 @@ class ExecutionSafetyTests(unittest.TestCase):
                 "executor_scope": "multi_instance",
                 "dispatch_commitment_bound": False,
                 "use_token": None,
+                "use_token_bound": False,
                 "endpoint_idempotency_enforced": False,
             }
         )
@@ -75,7 +77,26 @@ class ExecutionSafetyTests(unittest.TestCase):
         self.assertEqual(result.guarantee, ExecutionGuarantee.NONE)
         self.assertEqual(result.reason_code, "DISPATCH_OUTSIDE_ATOMIC_BOUNDARY")
 
-    def test_tool_endpoint_needs_both_use_token_and_enforcement(self):
+    def test_tool_endpoint_needs_bound_use_token_and_enforcement(self):
+        unbound_token = ConsumptionBinding.from_mapping(
+            {
+                "execution_binding": "external",
+                "consumption_authority": "tool-endpoint",
+                "consumption_mode": "tool_idempotent",
+                "executor_scope": "multi_instance",
+                "dispatch_commitment_bound": False,
+                "use_token": "caller-generated-retry-token",
+                "use_token_bound": False,
+                "endpoint_idempotency_enforced": True,
+            }
+        )
+        result = verify_execution_safety(unbound_token)
+        self.assertEqual(
+            result.verdict,
+            ExecutionSafetyVerdict.REPLAY_PROTECTION_UNPROVEN,
+        )
+        self.assertEqual(result.reason_code, "USE_TOKEN_BINDING_UNPROVEN")
+
         missing_enforcement = ConsumptionBinding.from_mapping(
             {
                 "execution_binding": "external",
@@ -84,12 +105,11 @@ class ExecutionSafetyTests(unittest.TestCase):
                 "executor_scope": "multi_instance",
                 "dispatch_commitment_bound": False,
                 "use_token": "grant-42:occurrence-7",
+                "use_token_bound": True,
                 "endpoint_idempotency_enforced": False,
             }
         )
-
         result = verify_execution_safety(missing_enforcement)
-
         self.assertEqual(
             result.verdict,
             ExecutionSafetyVerdict.REPLAY_PROTECTION_UNPROVEN,
@@ -104,6 +124,7 @@ class ExecutionSafetyTests(unittest.TestCase):
             "executor_scope": "multi_instance",
             "dispatch_commitment_bound": True,
             "use_token": None,
+            "use_token_bound": False,
             "endpoint_idempotency_enforced": False,
         }
         binding = ConsumptionBinding.from_mapping(value)
@@ -121,6 +142,7 @@ class ExecutionSafetyTests(unittest.TestCase):
             "consumption_mode": "tool_idempotent",
             "executor_scope": "multi_instance",
             "dispatch_commitment_bound": False,
+            "use_token_bound": True,
             "endpoint_idempotency_enforced": True,
         }
 
