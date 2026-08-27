@@ -17,6 +17,7 @@ from ibex_agent_verification.verification_graph import (
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "qa/ibex-verification-graph.json"
 WORKFLOW_PATH = ROOT / ".github/workflows/ibex-verification-graph.yml"
+TEMPORAL_WORKFLOW_PATH = ROOT / ".github/workflows/temporal-phase-relations.yml"
 CLI_PATH = ROOT / "scripts/ibex_verification_graph.py"
 HEAD = "a" * 40
 
@@ -174,13 +175,27 @@ class VerificationGraphCliTests(unittest.TestCase):
 
 
 class VerificationGraphWorkflowTests(unittest.TestCase):
-    def test_repository_workflow_passes_security_audit(self) -> None:
-        report = audit_workflow(WORKFLOW_PATH)
-        self.assertEqual(report, {
-            "workflow": WORKFLOW_PATH.as_posix(),
-            "status": "PASS",
-            "findings": [],
-        })
+    def test_repository_workflows_pass_security_audit(self) -> None:
+        for path in (WORKFLOW_PATH, TEMPORAL_WORKFLOW_PATH):
+            with self.subTest(path=path):
+                report = audit_workflow(path)
+                self.assertEqual(report, {
+                    "workflow": path.as_posix(),
+                    "status": "PASS",
+                    "findings": [],
+                })
+
+    def test_graph_workflow_requires_explicit_non_authority_result(self) -> None:
+        text = WORKFLOW_PATH.read_text(encoding="utf-8").replace(
+            "merge_authorized",
+            "merge-permitted",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ibex-verification-graph.yml"
+            path.write_text(text, encoding="utf-8")
+            report = audit_workflow(path)
+        self.assertEqual(report["status"], "BLOCK")
+        self.assertIn("missing explicit non-authority result", report["findings"])
 
     def test_unpinned_action_is_blocked(self) -> None:
         unsafe = """

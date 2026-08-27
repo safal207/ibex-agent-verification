@@ -106,6 +106,7 @@ jobs:
           [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$(git rev-parse HEAD)" == "$HEAD_SHA" ]]
           OBSERVED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          set +e
           python scripts/ibex_human_review_gate.py \
             --repository "$REPOSITORY" \
             --pull-request "$PR_NUMBER" \
@@ -116,6 +117,8 @@ jobs:
             --policy-version human-review-policy-v1 \
             --output artifacts/human-review-gate.json \
             --github-output "$GITHUB_OUTPUT"
+          gate_exit=$?
+          set -e
           python - <<'PY'
           import json
           from pathlib import Path
@@ -152,6 +155,7 @@ jobs:
           PY
           cat artifacts/human-review-summary.md >> "$GITHUB_STEP_SUMMARY"
           grep -F '"merge_authorized": false' artifacts/human-review-gate.json
+          exit "$gate_exit"
 
       - name: Enforce approval after draft phase
         env:

@@ -234,7 +234,7 @@ def finalize_plan(
 
 
 def audit_workflow(path: str | Path) -> dict[str, Any]:
-    """Audit the verification workflow's exact-head and permission boundaries."""
+    """Audit a PR workflow's exact-head and permission boundaries."""
 
     workflow_path = Path(path)
     text = workflow_path.read_text(encoding="utf-8")
@@ -248,9 +248,10 @@ def audit_workflow(path: str | Path) -> dict[str, Any]:
         ),
         "exact head checkout": "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
         "credential persistence disabled": "persist-credentials: false",
-        "PR-scoped concurrency": "group: ibex-verification-graph-${{ github.event.pull_request.number || github.ref }}",
-        "explicit non-authority result": "merge_authorized",
+        "PR-scoped concurrency": "${{ github.event.pull_request.number || github.ref }}",
     }
+    if workflow_path.name == "ibex-verification-graph.yml":
+        required_snippets["explicit non-authority result"] = "merge_authorized"
     for label, snippet in required_snippets.items():
         if snippet not in text:
             findings.append(f"missing {label}")

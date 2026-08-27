@@ -340,7 +340,10 @@ jobs:
           mkdir -p artifacts
           python scripts/ibex_verification_graph.py audit-workflow \
             --workflow .github/workflows/ibex-verification-graph.yml \
-            --output artifacts/workflow-security.json
+            --output artifacts/workflow-security-graph.json
+          python scripts/ibex_verification_graph.py audit-workflow \
+            --workflow .github/workflows/temporal-phase-relations.yml \
+            --output artifacts/workflow-security-temporal.json
 
   graph-verdict:
     name: Final graph verdict

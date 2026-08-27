@@ -15,6 +15,7 @@ from ibex_agent_verification.human_review_receipts import (
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/ibex_human_review_gate.py"
 SCHEMA = ROOT / "schemas/human_review_gate_v1.schema.json"
+WORKFLOW = ROOT / ".github/workflows/binding-human-review.yml"
 HEAD = "a" * 40
 
 
@@ -70,6 +71,25 @@ class HumanReviewGateRegressionTests(unittest.TestCase):
         self.assertEqual(gate["status"], "NON_RECOMPUTABLE")
         self.assertEqual(gate["reasons"][0]["code"], "INVALID_INPUT")
         self.assertFalse(gate["merge_authorized"])
+
+    def test_workflow_renders_diagnostics_before_preserving_gate_failure(self) -> None:
+        text = WORKFLOW.read_text(encoding="utf-8")
+        disable_errexit = text.index("          set +e\n")
+        gate_command = text.index("          python scripts/ibex_human_review_gate.py")
+        capture_exit = text.index("          gate_exit=$?\n")
+        restore_errexit = text.index("          set -e\n", capture_exit)
+        render_summary = text.index("Path(\"artifacts/human-review-summary.md\")")
+        assert_merge_boundary = text.index(
+            "grep -F '\"merge_authorized\": false' artifacts/human-review-gate.json"
+        )
+        preserve_failure = text.index('          exit "$gate_exit"\n')
+
+        self.assertLess(disable_errexit, gate_command)
+        self.assertLess(gate_command, capture_exit)
+        self.assertLess(capture_exit, restore_errexit)
+        self.assertLess(restore_errexit, render_summary)
+        self.assertLess(render_summary, assert_merge_boundary)
+        self.assertLess(assert_merge_boundary, preserve_failure)
 
     def test_schema_binds_derived_fields_to_every_status(self) -> None:
         schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
