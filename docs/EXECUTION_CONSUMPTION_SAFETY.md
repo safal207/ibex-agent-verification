@@ -48,7 +48,7 @@ The closed v1 profile defines:
 | `advisory_only` | state is checked or recorded separately from dispatch | `ADVISORY` |
 | `local_atomic` | consumption and dispatch commitment share one local atomic boundary | `SINGLE_INSTANCE` |
 | `shared_atomic` | competing executors share an atomic consumption/dispatch boundary | `ATOMIC` |
-| `outbox_atomic` | consume and enqueue/commit-dispatch occur in the same atomic transaction | `ATOMIC` |
+| `outbox_atomic` | consume and enqueue occur in the same atomic transaction; downstream delivery may still replay | `ATOMIC_ENQUEUE` |
 | `tool_idempotent` | the final endpoint enforces an occurrence-bound stable use token | `IDEMPOTENT_ENDPOINT` |
 
 ### Local atomicity is deployment-scoped
@@ -72,7 +72,13 @@ NOT_EXECUTION_SAFE
 DISPATCH_OUTSIDE_ATOMIC_BOUNDARY
 ```
 
-A shared ledger closes the gap only when the ledger transaction also commits the dispatch trigger, for example an outbox entry consumed by an executor.
+A shared ledger closes the consume/enqueue gap when the ledger transaction also commits the dispatch trigger. An outbox proves one enqueue commitment, but it does not prove exclusive external execution: a worker can repeat delivery after the side effect succeeds but before its acknowledgement is recorded. Without occurrence-bound endpoint idempotency or equivalent delivery enforcement, `outbox_atomic` therefore returns:
+
+```text
+REPLAY_PROTECTION_UNPROVEN
+ATOMIC_ENQUEUE
+OUTBOX_DELIVERY_REPLAY_PROTECTION_UNPROVEN
+```
 
 ### Endpoint idempotency
 
@@ -131,6 +137,7 @@ The result separately exposes a maximum guarantee:
 - `ADVISORY`
 - `SINGLE_INSTANCE`
 - `ATOMIC`
+- `ATOMIC_ENQUEUE`
 - `IDEMPOTENT_ENDPOINT`
 
 ## Conformance
@@ -147,7 +154,7 @@ They lock at least these boundaries:
 2. local atomic single-instance execution → safe only within that instance scope;
 3. local state with multiple workers → cross-instance replay protection unproven;
 4. atomic shared-ledger consume followed by separate HTTP dispatch → not execution safe;
-5. outbox consume + enqueue in one transaction → atomic execution commitment;
+5. outbox consume + enqueue in one transaction → atomic enqueue, but external-delivery replay protection remains unproven;
 6. endpoint idempotency without a use token → token required;
 7. endpoint idempotency with an unbound caller-generated token → replay protection unproven;
 8. endpoint idempotency with an occurrence-bound stable token and enforcement evidence → execution safe.

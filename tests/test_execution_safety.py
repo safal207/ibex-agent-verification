@@ -77,6 +77,32 @@ class ExecutionSafetyTests(unittest.TestCase):
         self.assertEqual(result.guarantee, ExecutionGuarantee.NONE)
         self.assertEqual(result.reason_code, "DISPATCH_OUTSIDE_ATOMIC_BOUNDARY")
 
+    def test_atomic_outbox_does_not_claim_exclusive_external_execution(self):
+        binding = ConsumptionBinding.from_mapping(
+            {
+                "execution_binding": "external",
+                "consumption_authority": "dispatch-ledger",
+                "consumption_mode": "outbox_atomic",
+                "executor_scope": "multi_instance",
+                "dispatch_commitment_bound": True,
+                "use_token": None,
+                "use_token_bound": False,
+                "endpoint_idempotency_enforced": False,
+            }
+        )
+
+        result = verify_execution_safety(binding)
+
+        self.assertEqual(
+            result.verdict,
+            ExecutionSafetyVerdict.REPLAY_PROTECTION_UNPROVEN,
+        )
+        self.assertEqual(result.guarantee, ExecutionGuarantee.ATOMIC_ENQUEUE)
+        self.assertEqual(
+            result.reason_code,
+            "OUTBOX_DELIVERY_REPLAY_PROTECTION_UNPROVEN",
+        )
+
     def test_tool_endpoint_needs_bound_use_token_and_enforcement(self):
         unbound_token = ConsumptionBinding.from_mapping(
             {

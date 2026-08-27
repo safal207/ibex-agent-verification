@@ -87,9 +87,9 @@
         "endpoint_idempotency_enforced": false
       },
       "expected": {
-        "verdict": "EXECUTION_SAFE",
-        "guarantee": "ATOMIC",
-        "reason_code": "ATOMIC_CONSUME_AND_DISPATCH_COMMIT"
+        "verdict": "REPLAY_PROTECTION_UNPROVEN",
+        "guarantee": "ATOMIC_ENQUEUE",
+        "reason_code": "OUTBOX_DELIVERY_REPLAY_PROTECTION_UNPROVEN"
       }
     },
     {

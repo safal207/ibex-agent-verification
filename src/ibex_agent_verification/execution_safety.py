@@ -46,6 +46,7 @@ class ExecutionGuarantee(str, Enum):
     ADVISORY = "ADVISORY"
     SINGLE_INSTANCE = "SINGLE_INSTANCE"
     ATOMIC = "ATOMIC"
+    ATOMIC_ENQUEUE = "ATOMIC_ENQUEUE"
     IDEMPOTENT_ENDPOINT = "IDEMPOTENT_ENDPOINT"
 
 
@@ -224,7 +225,14 @@ def verify_execution_safety(binding: ConsumptionBinding) -> ExecutionSafetyResul
             "LOCAL_CONSUME_AND_DISPATCH_ATOMIC",
         )
 
-    if mode in {ConsumptionMode.SHARED_ATOMIC, ConsumptionMode.OUTBOX_ATOMIC}:
+    if mode is ConsumptionMode.OUTBOX_ATOMIC:
+        return ExecutionSafetyResult(
+            ExecutionSafetyVerdict.REPLAY_PROTECTION_UNPROVEN,
+            ExecutionGuarantee.ATOMIC_ENQUEUE,
+            "OUTBOX_DELIVERY_REPLAY_PROTECTION_UNPROVEN",
+        )
+
+    if mode is ConsumptionMode.SHARED_ATOMIC:
         return ExecutionSafetyResult(
             ExecutionSafetyVerdict.EXECUTION_SAFE,
             ExecutionGuarantee.ATOMIC,
