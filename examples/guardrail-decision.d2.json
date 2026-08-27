@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "decision_id": "gd_01J_VERIFIER_DEPTH_EXAMPLE",
+  "tool_call_id": "tc_01J_SEND_EMAIL_EXAMPLE",
+  "decision": "REPAIR",
+  "reason_code": "MISSING_REQUIRED_PARAMETER",
+  "failure_class": "SCHEMA_VIOLATION",
+  "violated_boundary": "TOOL_INPUT_CONTRACT",
+  "severity": "LOW",
+  "retry_policy": "AFTER_REPAIR",
+  "suggested_replan_constraint": {
+    "allowed_tool": "send_email",
+    "required_fields": ["recipient", "subject", "body"],
+    "forbidden_changes": ["recipient_domain"]
+  },
+  "required_remediation": {
+    "handler": "SchemaInjector",
+    "mode": "AUTOMATIC"
+  },
+  "policy_version": "policy-2026-06-30.1",
+  "verifier_depth": "D2",
+  "allowed_runtime_use": [
+    "LOW_RISK_REPAIR",
+    "STRUCTURED_REPLAN",
+    "CONTROLLED_AUTONOMOUS_RETRY"
+  ],
+  "trust_domain": "independent-registry-recomputed",
+  "recompute_mode": "portable-fixture",
+  "claim_ceiling": "bounded-third-party-reproducible",
+  "permitted_next_transition": "REPAIR_AND_RETRY_WITHIN_DECLARED_SCOPE",
+  "evidence_refs": [
+    "sha256:1b1f2f9e4d138d4c669f6d708f6bb4c1c96cbac9f30a31bb7418d2fbb08b6276"
+  ],
+  "issued_at": "2026-06-30T12:00:00Z",
+  "expires_at": "2026-06-30T12:05:00Z",
+  "continuation_id": null,
+  "action_id": "sha256:b3b1e97f217dc3f6904a14686a963d1406d3a829b3a11246f699583b5a5b54fa",
+  "estimated_cost_avoided": {
+    "amount": 12.5,
+    "currency": "USD",
+    "method": "recoverable-failure-model-v1"
+  },
+  "cost_of_delay": {
+    "amount": 0.02,
+    "currency": "USD"
+  }
+}

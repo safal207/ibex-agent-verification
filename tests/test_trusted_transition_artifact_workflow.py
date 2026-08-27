@@ -86,7 +86,10 @@ class TrustedTransitionArtifactWorkflowTests(unittest.TestCase):
         self.assertIn(
             "uses: ./.github/workflows/trusted-transition-artifact.yml", sign
         )
-        self.assertIn("source_run_id: ${{ github.run_id }}", sign)
+        self.assertIn("source_run_id: ${{ fromJSON(github.run_id) }}", sign)
+        self.assertIn(
+            "source_run_attempt: ${{ fromJSON(github.run_attempt) }}", sign
+        )
         self.assertIn("id-token: write", sign)
         self.assertIn("attestations: write", sign)
 

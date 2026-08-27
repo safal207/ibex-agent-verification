@@ -1,0 +1,465 @@
+name: Ibex Verification Graph
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      changed_files_json:
+        description: JSON array of repository-relative changed paths
+        required: false
+        default: '["docs/IBEX_VERIFICATION_GRAPH.md"]'
+
+concurrency:
+  group: ibex-verification-graph-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  plan:
+    name: Build L1-L4 verification graph
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      depth: ${{ steps.graph-plan.outputs.depth }}
+      changed_count: ${{ steps.graph-plan.outputs.changed_count }}
+      require_schema: ${{ steps.graph-plan.outputs.require_schema }}
+      require_authority: ${{ steps.graph-plan.outputs.require_authority }}
+      require_wheel: ${{ steps.graph-plan.outputs.require_wheel }}
+      require_workflow_security: ${{ steps.graph-plan.outputs.require_workflow_security }}
+      require_human: ${{ steps.graph-plan.outputs.require_human }}
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: python -m pip install -e .
+
+      - name: Collect authoritative changed paths
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                per_page: 100,
+              },
+            );
+            const paths = new Set();
+            for (const file of files) {
+              paths.add(file.filename);
+              if (file.status === "renamed" && file.previous_filename) {
+                paths.add(file.previous_filename);
+              }
+            }
+            if (paths.size === 0) {
+              core.setFailed("verification graph requires at least one changed path");
+              return;
+            }
+            require("node:fs").writeFileSync(
+              "changed-files.json",
+              `${JSON.stringify([...paths])}\n`,
+            );
+
+      - name: Collect manual changed paths
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CHANGED_FILES_JSON: ${{ inputs.changed_files_json || '["docs/IBEX_VERIFICATION_GRAPH.md"]' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          files = json.loads(os.environ["CHANGED_FILES_JSON"])
+          if not isinstance(files, list) or not files:
+              raise SystemExit("manual graph run requires a non-empty path array")
+          Path("changed-files.json").write_text(
+              json.dumps(files) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Build deterministic graph plan
+        id: graph-plan
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p artifacts
+          python scripts/ibex_verification_graph.py plan \
+            --policy qa/ibex-verification-graph.json \
+            --files-json "$(cat changed-files.json)" \
+            --head "$HEAD_SHA" \
+            --output artifacts/ibex-verification-plan.json \
+            --summary artifacts/ibex-verification-plan.md \
+            --github-output "$GITHUB_OUTPUT"
+          cat artifacts/ibex-verification-plan.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload machine-readable plan
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ibex-verification-plan-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+  exact-head:
+    name: Exact head binding
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify immutable source identity
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_HEAD" ]]
+          git diff --exit-code
+
+  graph-contract:
+    name: Graph contract
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: Validate policy and mutation-resistant graph behavior
+        run: |
+          python scripts/ibex_verification_graph.py validate-policy \
+            --policy qa/ibex-verification-graph.json
+          python -m unittest discover \
+            -s tests \
+            -p 'test_verification_graph.py' \
+            -v
+
+  contract-tests:
+    name: Python contract suite
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e . pytest==8.4.1
+      - name: Prove function-style governance tests are collected
+        run: |
+          mkdir -p artifacts
+          python -m pytest --collect-only -q | tee artifacts/pytest-collection.txt
+          grep -F \
+            "tests/test_verifier_depth.py::test_trust_domain_mismatch_is_collision" \
+            artifacts/pytest-collection.txt
+      - name: Execute complete contract suite
+        run: |
+          python -m pytest -q \
+            --junitxml=artifacts/pytest-contract-suite.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ibex-python-contract-suite-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+  schema-vectors:
+    name: Schema and vectors
+    needs: plan
+    if: needs.plan.outputs.require_schema == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e . pytest==8.4.1
+      - name: Recompute published schemas and canonical vectors
+        run: |
+          python -m pytest -q \
+            tests/test_action_chain_schema_parity.py \
+            tests/test_full_chain_vector.py \
+            tests/test_action_envelope_schema_parity.py \
+            tests/test_action_envelope_v1.py
+
+  authority-invariants:
+    name: Authority invariants
+    needs: plan
+    if: needs.plan.outputs.require_authority == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e . pytest==8.4.1
+      - name: Verify fail-closed continuation, evidence, domain and adapter boundaries
+        run: |
+          python -m pytest -q \
+            tests/test_verifier_depth.py \
+            tests/test_jcs_action_chain.py \
+            tests/test_decision_hash_validation.py \
+            tests/test_crewai_action_envelope_adapter.py \
+            tests/test_crewai_identity_binding.py \
+            tests/test_crewai_provider_isolation.py
+
+  installed-wheel:
+    name: Installed wheel
+    needs: plan
+    if: needs.plan.outputs.require_wheel == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Build and install isolated wheel
+        run: |
+          python -m pip wheel . --no-deps --wheel-dir dist
+          python -m venv /tmp/ibex-graph-wheel
+          /tmp/ibex-graph-wheel/bin/python -m pip install --no-deps dist/*.whl
+      - name: Recompute ActionEnvelopeV1 from installed runtime
+        run: |
+          cd /tmp
+          /tmp/ibex-graph-wheel/bin/python - <<'PY'
+          from ibex_agent_verification.action_chain import canonical_action_envelope_v1_id
+          from ibex_agent_verification.schema_validation import validate_action_envelope_v1
+
+          envelope = {
+              "@context": "urn:ibex-agent-verification:action-envelope:v1",
+              "tool_identity": "send_email",
+              "args_digest": "sha256:" + "a" * 64,
+              "caller_identity": "agent:qa",
+              "resource_scope": "workspace:demo",
+              "policy_version": "policy-v1",
+              "authorization_deadline": "2026-07-01T05:00:00Z",
+          }
+          assert validate_action_envelope_v1(envelope) == ()
+          assert canonical_action_envelope_v1_id(envelope) == (
+              "sha256:325d87f3a89db334374b25f839c6dfcf"
+              "528fac357b7c554b01a1486a570522c7"
+          )
+          PY
+
+  workflow-security:
+    name: Workflow security
+    needs: plan
+    if: needs.plan.outputs.require_workflow_security == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: Audit permissions, exact-head checkout and action pinning
+        run: |
+          mkdir -p artifacts
+          python scripts/ibex_verification_graph.py audit-workflow \
+            --workflow .github/workflows/ibex-verification-graph.yml \
+            --output artifacts/workflow-security.json
+
+  graph-verdict:
+    name: Final graph verdict
+    needs:
+      - plan
+      - exact-head
+      - graph-contract
+      - contract-tests
+      - schema-vectors
+      - authority-invariants
+      - installed-wheel
+      - workflow-security
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install -e .
+
+      - name: Recollect authoritative changed paths
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                per_page: 100,
+              },
+            );
+            const paths = new Set();
+            for (const file of files) {
+              paths.add(file.filename);
+              if (file.status === "renamed" && file.previous_filename) {
+                paths.add(file.previous_filename);
+              }
+            }
+            require("node:fs").writeFileSync(
+              "changed-files.json",
+              `${JSON.stringify([...paths])}\n`,
+            );
+
+      - name: Recollect manual changed paths
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CHANGED_FILES_JSON: ${{ inputs.changed_files_json || '["docs/IBEX_VERIFICATION_GRAPH.md"]' }}
+        run: |
+          printf '%s\n' "$CHANGED_FILES_JSON" > changed-files.json
+
+      - name: Rebuild exact plan
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p artifacts
+          python scripts/ibex_verification_graph.py plan \
+            --policy qa/ibex-verification-graph.json \
+            --files-json "$(cat changed-files.json)" \
+            --head "$HEAD_SHA" \
+            --output artifacts/ibex-verification-plan.json
+
+      - name: Bind job results and derive verdict
+        env:
+          EXACT_HEAD_RESULT: ${{ needs.exact-head.result }}
+          GRAPH_CONTRACT_RESULT: ${{ needs.graph-contract.result }}
+          CONTRACT_TESTS_RESULT: ${{ needs.contract-tests.result }}
+          SCHEMA_VECTORS_RESULT: ${{ needs.schema-vectors.result }}
+          AUTHORITY_RESULT: ${{ needs.authority-invariants.result }}
+          WHEEL_RESULT: ${{ needs.installed-wheel.result }}
+          WORKFLOW_SECURITY_RESULT: ${{ needs.workflow-security.result }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          results = {
+              "exact_head": os.environ["EXACT_HEAD_RESULT"],
+              "graph_contract": os.environ["GRAPH_CONTRACT_RESULT"],
+              "python_contract_suite": os.environ["CONTRACT_TESTS_RESULT"],
+              "schema_vectors": os.environ["SCHEMA_VECTORS_RESULT"],
+              "authority_invariants": os.environ["AUTHORITY_RESULT"],
+              "installed_wheel": os.environ["WHEEL_RESULT"],
+              "workflow_security": os.environ["WORKFLOW_SECURITY_RESULT"],
+          }
+          Path("artifacts/job-results.json").write_text(
+              json.dumps(results) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          python scripts/ibex_verification_graph.py finalize \
+            --plan artifacts/ibex-verification-plan.json \
+            --results-json "$(cat artifacts/job-results.json)" \
+            --output artifacts/ibex-verification-graph.json \
+            --summary artifacts/ibex-verification-graph.md
+          cat artifacts/ibex-verification-graph.md >> "$GITHUB_STEP_SUMMARY"
+          grep -F '"merge_authorized": false' artifacts/ibex-verification-graph.json
+
+      - name: Upload final graph evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ibex-verification-graph-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 30

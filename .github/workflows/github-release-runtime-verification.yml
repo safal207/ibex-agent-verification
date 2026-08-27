@@ -261,6 +261,6 @@ jobs:
     uses: ./.github/workflows/trusted-transition-artifact.yml
     with:
       source_sha: ${{ github.event.workflow_run.head_sha }}
-      source_run_id: ${{ github.run_id }}
-      source_run_attempt: ${{ github.run_attempt }}
+      source_run_id: ${{ fromJSON(github.run_id) }}
+      source_run_attempt: ${{ fromJSON(github.run_attempt) }}
       source_head_repository_id: ${{ github.event.workflow_run.head_repository.id }}

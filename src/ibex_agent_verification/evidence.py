@@ -323,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
             tool_versions_file=Path(args.tool_versions_file),
             commands_file=Path(args.commands_file),
         )
-    except EvidenceError as exc:
+    except (EvidenceError, OSError) as exc:
         print(json.dumps({"status": "INVALID_INPUT", "error": str(exc)}, indent=2), flush=True)
         return 2
     print(json.dumps({"status": "MANIFEST_WRITTEN", "output": args.output, "files": len(manifest["files"])}, indent=2, sort_keys=True))
