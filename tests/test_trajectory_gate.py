@@ -1,7 +1,10 @@
 from copy import deepcopy
 import unittest
 
-from ibex_agent_verification.trajectory_gate import evaluate_trajectory_gate
+from ibex_agent_verification.trajectory_gate import (
+    TrajectoryGateError,
+    evaluate_trajectory_gate,
+)
 
 
 def base_record() -> dict:
@@ -77,6 +80,18 @@ class TrajectoryGateTests(unittest.TestCase):
         self.assertEqual(result["best_next_transition"]["type"], "DEFER")
         self.assertEqual(result["gates"]["codex"]["status"], "UNRESOLVED")
         self.assertFalse(result["gates"]["codex"]["applies_to_head"])
+
+    def test_malformed_finding_line_raises_domain_error(self):
+        record = base_record()
+        record["gates"]["codex"]["blocking_findings"] = [
+            {"code": "BAD_LINE", "message": "invalid source line", "line": "x"}
+        ]
+
+        with self.assertRaisesRegex(
+            TrajectoryGateError,
+            "codex finding line must be an integer",
+        ):
+            evaluate_trajectory_gate(record)
 
     def test_coderabbit_rate_limited_is_unresolved(self):
         record = base_record()
