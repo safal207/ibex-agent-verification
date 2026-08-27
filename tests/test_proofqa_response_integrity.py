@@ -157,6 +157,90 @@ class ProofQAResponseIntegrityTests(unittest.TestCase):
             with self.assertRaisesRegex(ResponseIntegrityError, "verdict mismatch"):
                 self.verify(bundle, path)
 
+    def test_digest_binds_exact_response_and_claim_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = self.copy_bundle(Path(directory))
+            record = self.build_record("supported_exact_result")
+            record["response_text"] = f" {record['response_text']} "
+            record["response_digest"] = digest_uri(
+                {
+                    "profile_id": RESPONSE_PROFILE,
+                    "response_text": record["response_text"],
+                }
+            )
+            claim = record["claims"][0]
+            claim["claim_text"] = f" {claim['claim_text']} "
+            claim["claim_digest"] = digest_uri(
+                {
+                    "profile_id": CLAIM_PROFILE,
+                    "claim_text": claim["claim_text"],
+                }
+            )
+            path = self.add_integrity_record(bundle, record)
+
+            receipt = self.verify(bundle, path)
+
+        self.assertEqual(receipt["status"], "VERIFIED")
+        self.assertEqual(
+            receipt["response_integrity"]["response_digest"],
+            record["response_digest"],
+        )
+
+    def test_top_level_array_fails_with_bounded_domain_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = self.copy_bundle(Path(directory))
+            path = self.add_integrity_record(bundle, [])
+            with self.assertRaisesRegex(
+                (TransitionManifestError, ResponseIntegrityError),
+                "response integrity record must be a JSON object|"
+                "response integrity record must be an object",
+            ):
+                self.verify(bundle, path)
+
+    def test_unhashable_claim_id_fails_with_bounded_domain_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = self.copy_bundle(Path(directory))
+            record = self.build_record("supported_exact_result")
+            record["claims"][0]["claim_id"] = []
+            path = self.add_integrity_record(bundle, record)
+            with self.assertRaisesRegex(
+                ResponseIntegrityError,
+                r"claims\[0\]\.claim_id must be a non-empty string",
+            ):
+                self.verify(bundle, path)
+
+    def test_schema_and_runtime_pin_comparison_shapes(self):
+        schema = json.loads(
+            (ROOT / "schemas/proofqa-response-integrity-v0.1.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        branches = schema["$defs"]["claim"]["properties"]["comparison"]["oneOf"]
+        required_by_kind = {
+            branch["properties"]["kind"]["const"]: set(branch["required"])
+            for branch in branches
+        }
+        self.assertEqual(
+            required_by_kind,
+            {
+                "JSON_POINTER_EQUALS": {"kind", "pointer", "expected_value"},
+                "REFERENCE_PRESENT": {"kind"},
+                "OUT_OF_SCOPE": {"kind"},
+            },
+        )
+        self.assertTrue(all(branch["additionalProperties"] is False for branch in branches))
+
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = self.copy_bundle(Path(directory))
+            record = self.build_record("missing_citation_binding")
+            record["claims"][0]["comparison"]["pointer"] = "/status"
+            path = self.add_integrity_record(bundle, record)
+            with self.assertRaisesRegex(
+                ResponseIntegrityError,
+                "REFERENCE_PRESENT must contain only kind",
+            ):
+                self.verify(bundle, path)
+
     def test_tampered_integrity_bytes_fail_manifest_verification(self):
         with tempfile.TemporaryDirectory() as directory:
             bundle = self.copy_bundle(Path(directory))

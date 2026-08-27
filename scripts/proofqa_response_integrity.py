@@ -67,7 +67,7 @@ def _text(value: Any, *, label: str, maximum: int) -> str:
         raise ResponseIntegrityError(
             f"{label} must be a non-empty string of at most {maximum} characters"
         )
-    return value.strip()
+    return value
 
 
 def _json_pointer(document: Any, pointer: Any, *, label: str) -> Any:
@@ -143,16 +143,31 @@ def _evaluate_claim(
     kind = comparison["kind"]
 
     if kind == "OUT_OF_SCOPE":
+        if set(comparison) != {"kind"}:
+            raise ResponseIntegrityError(
+                f"{label}.comparison OUT_OF_SCOPE must contain only kind"
+            )
         derived = "OUT_OF_SCOPE"
     elif kind == "REFERENCE_PRESENT":
+        if set(comparison) != {"kind"}:
+            raise ResponseIntegrityError(
+                f"{label}.comparison REFERENCE_PRESENT must contain only kind"
+            )
         derived = "SUPPORTED" if refs and len(available_paths) == len(refs) else "UNVERIFIABLE"
     elif kind == "JSON_POINTER_EQUALS":
+        if set(comparison) != {"kind", "pointer", "expected_value"}:
+            raise ResponseIntegrityError(
+                f"{label}.comparison JSON_POINTER_EQUALS must contain exactly "
+                "kind, pointer, and expected_value"
+            )
+        pointer = comparison["pointer"]
+        if not isinstance(pointer, str) or not pointer.startswith("/"):
+            raise ResponseIntegrityError(
+                f"{label}.comparison.pointer must be a JSON Pointer beginning with /"
+            )
         if len(refs) != 1 or len(available_paths) != 1:
             derived = "UNVERIFIABLE"
         else:
-            pointer = comparison.get("pointer")
-            if "expected_value" not in comparison:
-                raise ResponseIntegrityError(f"{label}.comparison.expected_value is required")
             observation = _load_json(
                 root / available_paths[0],
                 label=f"claim observation {available_paths[0]}",
@@ -222,6 +237,8 @@ def verify_response_integrity_manifest(
         )
 
     record = _load_json(integrity_file, label="response integrity record")
+    if not isinstance(record, dict):
+        raise ResponseIntegrityError("response integrity record must be an object")
     expected_keys = {
         "schema_version",
         "profile",
@@ -273,7 +290,11 @@ def verify_response_integrity_manifest(
     for index, claim in enumerate(claims):
         if not isinstance(claim, dict):
             raise ResponseIntegrityError(f"response_integrity.claims[{index}] must be an object")
-        claim_id = claim.get("claim_id")
+        claim_id = _text(
+            claim.get("claim_id"),
+            label=f"response_integrity.claims[{index}].claim_id",
+            maximum=160,
+        )
         if claim_id in seen_ids:
             raise ResponseIntegrityError(f"duplicate response integrity claim_id: {claim_id}")
         seen_ids.add(claim_id)

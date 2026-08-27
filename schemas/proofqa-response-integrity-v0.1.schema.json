@@ -72,16 +72,30 @@
           "uniqueItems": true
         },
         "comparison": {
-          "type": "object",
-          "required": ["kind"],
-          "properties": {
-            "kind": {
-              "enum": ["JSON_POINTER_EQUALS", "REFERENCE_PRESENT", "OUT_OF_SCOPE"]
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["kind", "pointer", "expected_value"],
+              "properties": {
+                "kind": {"const": "JSON_POINTER_EQUALS"},
+                "pointer": {"type": "string", "pattern": "^/"},
+                "expected_value": {}
+              },
+              "additionalProperties": false
             },
-            "pointer": {"type": "string"},
-            "expected_value": {}
-          },
-          "additionalProperties": false
+            {
+              "type": "object",
+              "required": ["kind"],
+              "properties": {"kind": {"const": "REFERENCE_PRESENT"}},
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["kind"],
+              "properties": {"kind": {"const": "OUT_OF_SCOPE"}},
+              "additionalProperties": false
+            }
+          ]
         },
         "verdict": {
           "enum": ["SUPPORTED", "CONTRADICTED", "UNVERIFIABLE", "OUT_OF_SCOPE"]

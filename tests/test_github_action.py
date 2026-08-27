@@ -1,8 +1,10 @@
 import hashlib
+import io
 import json
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -67,6 +69,7 @@ class GitHubActionAdapterTests(unittest.TestCase):
             report = root / "out" / "decision.json"
             output = root / "github-output.txt"
             summary = root / "step-summary.md"
+            captured_stdout = io.StringIO()
             with patch.dict(
                 os.environ,
                 {
@@ -75,11 +78,13 @@ class GitHubActionAdapterTests(unittest.TestCase):
                 },
                 clear=False,
             ):
-                result = run(request, report)
+                with redirect_stdout(captured_stdout):
+                    result = run(request, report)
 
             output_text = output.read_text()
             summary_text = summary.read_text()
             report_sha = hashlib.sha256(report.read_bytes()).hexdigest()
+            annotation_text = captured_stdout.getvalue()
 
         self.assertEqual(result["decision"], "ALLOW")
         self.assertIn("decision=ALLOW", output_text)
@@ -87,6 +92,7 @@ class GitHubActionAdapterTests(unittest.TestCase):
         self.assertIn(f"report_sha256={report_sha}", output_text)
         self.assertIn("## Silicon Evidence Gate", summary_text)
         self.assertIn("**Decision:** `ALLOW`", summary_text)
+        self.assertIn("NO_EVIDENCE_REGRESSION", annotation_text)
 
     def test_block_is_published_without_adapter_failure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -94,30 +100,42 @@ class GitHubActionAdapterTests(unittest.TestCase):
             request = self.build_request(root, trace_status="MISMATCH")
             report = root / "decision.json"
             output = root / "github-output.txt"
+            captured_stdout = io.StringIO()
             with patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}, clear=False):
-                status = main(["--request", str(request), "--report", str(report)])
+                with redirect_stdout(captured_stdout):
+                    status = main(
+                        ["--request", str(request), "--report", str(report)]
+                    )
             payload = json.loads(report.read_text())
             output_text = output.read_text()
+            annotation_text = captured_stdout.getvalue()
 
         self.assertEqual(status, 0)
         self.assertEqual(payload["decision"], "BLOCK")
         self.assertIn("decision=BLOCK", output_text)
         self.assertIn("ARCHITECTURAL_TRACE_MISMATCH", output_text)
+        self.assertIn("ARCHITECTURAL_TRACE_MISMATCH", annotation_text)
 
     def test_invalid_input_returns_two(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             request = root / "invalid.json"
             request.write_text("{}", encoding="utf-8")
-            status = main(
-                [
-                    "--request",
-                    str(request),
-                    "--report",
-                    str(root / "decision.json"),
-                ]
-            )
+            captured_stdout = io.StringIO()
+            with redirect_stdout(captured_stdout):
+                status = main(
+                    [
+                        "--request",
+                        str(request),
+                        "--report",
+                        str(root / "decision.json"),
+                    ]
+                )
+            annotation_text = captured_stdout.getvalue()
+
         self.assertEqual(status, 2)
+        self.assertIn("INVALID_INPUT", annotation_text)
+        self.assertIn("schema_version must be 1", annotation_text)
 
 
 if __name__ == "__main__":
