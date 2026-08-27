@@ -15,6 +15,7 @@ from ibex_agent_verification.evidence import (
     verify_manifest,
     write_manifest,
 )
+from ibex_agent_verification.evidence import main as evidence_main
 
 
 class EvidenceManifestTests(unittest.TestCase):
@@ -82,6 +83,41 @@ class EvidenceManifestTests(unittest.TestCase):
                     tool_versions_file=versions,
                     commands_file=commands,
                 )
+
+    def test_manifest_cli_formats_filesystem_failures_as_invalid_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence, versions, commands = self.make_bundle(root)
+            blocked_parent = root / "not-a-directory"
+            blocked_parent.write_text("file\n", encoding="utf-8")
+            stdout = StringIO()
+
+            with redirect_stdout(stdout):
+                exit_code = evidence_main(
+                    [
+                        "--evidence-dir",
+                        str(evidence),
+                        "--output",
+                        str(blocked_parent / "manifest.json"),
+                        "--project-sha",
+                        "project123",
+                        "--ibex-requested-ref",
+                        "requested456",
+                        "--ibex-resolved-sha",
+                        "resolved789",
+                        "--ibex-config",
+                        "small",
+                        "--timing-exit-code",
+                        "0",
+                        "--tool-versions-file",
+                        str(versions),
+                        "--commands-file",
+                        str(commands),
+                    ]
+                )
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(json.loads(stdout.getvalue())["status"], "INVALID_INPUT")
 
 
 class EvidenceVerificationTests(unittest.TestCase):
