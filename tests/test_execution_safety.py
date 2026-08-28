@@ -15,6 +15,17 @@ from ibex_agent_verification.execution_safety import (
 
 ROOT = Path(__file__).resolve().parents[1]
 VECTOR_PATH = ROOT / "conformance" / "execution-consumption-v1.json"
+EXPECTED_CASE_NAMES = {
+    "advisory-ledger-check-then-separate-dispatch",
+    "local-atomic-single-instance",
+    "local-atomic-multi-worker",
+    "shared-ledger-consume-then-separate-http-dispatch",
+    "outbox-consume-and-enqueue-same-transaction",
+    "outbox-with-occurrence-bound-endpoint-idempotency",
+    "tool-idempotency-without-use-token",
+    "tool-idempotency-unbound-use-token",
+    "tool-idempotency-occurrence-bound-use-token",
+}
 
 
 class ExecutionSafetyTests(unittest.TestCase):
@@ -22,6 +33,11 @@ class ExecutionSafetyTests(unittest.TestCase):
         profile = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
         self.assertEqual(profile["profile"], "execution-consumption-v1")
         self.assertEqual(profile["invariant"], "Authority follows atomicity")
+        self.assertEqual(
+            {case["name"] for case in profile["cases"]},
+            EXPECTED_CASE_NAMES,
+        )
+        self.assertEqual(len(profile["cases"]), len(EXPECTED_CASE_NAMES))
 
         for case in profile["cases"]:
             with self.subTest(case=case["name"]):

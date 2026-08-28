@@ -48,7 +48,7 @@ The closed v1 profile defines:
 | `advisory_only` | state is checked or recorded separately from dispatch | `ADVISORY` |
 | `local_atomic` | consumption and dispatch commitment share one local atomic boundary | `SINGLE_INSTANCE` |
 | `shared_atomic` | competing executors share an atomic consumption/dispatch boundary | `ATOMIC` |
-| `outbox_atomic` | consume and enqueue occur in the same atomic transaction; downstream delivery may still replay | `ATOMIC_ENQUEUE` |
+| `outbox_atomic` | consume and enqueue occur in the same atomic transaction; downstream delivery may still replay unless the final endpoint proves occurrence-bound idempotency | `ATOMIC_ENQUEUE`, or `IDEMPOTENT_ENDPOINT` with complete endpoint evidence |
 | `tool_idempotent` | the final endpoint enforces an occurrence-bound stable use token | `IDEMPOTENT_ENDPOINT` |
 
 ### Local atomicity is deployment-scoped
@@ -79,6 +79,12 @@ REPLAY_PROTECTION_UNPROVEN
 ATOMIC_ENQUEUE
 OUTBOX_DELIVERY_REPLAY_PROTECTION_UNPROVEN
 ```
+
+When the same outbox record supplies a stable non-empty `use_token`, proves
+that token is bound to the exact authorized occurrence, and states that the
+final endpoint enforces it idempotently, the classifier can instead return
+`EXECUTION_SAFE` with `IDEMPOTENT_ENDPOINT`. This is still a classification of
+supplied evidence; it does not independently prove the endpoint implementation.
 
 ### Endpoint idempotency
 
@@ -155,9 +161,10 @@ They lock at least these boundaries:
 3. local state with multiple workers → cross-instance replay protection unproven;
 4. atomic shared-ledger consume followed by separate HTTP dispatch → not execution safe;
 5. outbox consume + enqueue in one transaction → atomic enqueue, but external-delivery replay protection remains unproven;
-6. endpoint idempotency without a use token → token required;
-7. endpoint idempotency with an unbound caller-generated token → replay protection unproven;
-8. endpoint idempotency with an occurrence-bound stable token and enforcement evidence → execution safe.
+6. outbox consume + enqueue with an occurrence-bound token and endpoint enforcement → execution safe at the idempotent endpoint;
+7. endpoint idempotency without a use token → token required;
+8. endpoint idempotency with an unbound caller-generated token → replay protection unproven;
+9. endpoint idempotency with an occurrence-bound stable token and enforcement evidence → execution safe.
 
 ## Claim boundary
 

@@ -226,6 +226,16 @@ def verify_execution_safety(binding: ConsumptionBinding) -> ExecutionSafetyResul
         )
 
     if mode is ConsumptionMode.OUTBOX_ATOMIC:
+        if (
+            binding.use_token is not None
+            and binding.use_token_bound
+            and binding.endpoint_idempotency_enforced
+        ):
+            return ExecutionSafetyResult(
+                ExecutionSafetyVerdict.EXECUTION_SAFE,
+                ExecutionGuarantee.IDEMPOTENT_ENDPOINT,
+                "OUTBOX_ENDPOINT_IDEMPOTENCY_ENFORCED",
+            )
         return ExecutionSafetyResult(
             ExecutionSafetyVerdict.REPLAY_PROTECTION_UNPROVEN,
             ExecutionGuarantee.ATOMIC_ENQUEUE,

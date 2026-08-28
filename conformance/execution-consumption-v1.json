@@ -93,6 +93,24 @@
       }
     },
     {
+      "name": "outbox-with-occurrence-bound-endpoint-idempotency",
+      "binding": {
+        "execution_binding": "external",
+        "consumption_authority": "dispatch-ledger-and-tool-endpoint",
+        "consumption_mode": "outbox_atomic",
+        "executor_scope": "multi_instance",
+        "dispatch_commitment_bound": true,
+        "use_token": "grant-42:occurrence-7",
+        "use_token_bound": true,
+        "endpoint_idempotency_enforced": true
+      },
+      "expected": {
+        "verdict": "EXECUTION_SAFE",
+        "guarantee": "IDEMPOTENT_ENDPOINT",
+        "reason_code": "OUTBOX_ENDPOINT_IDEMPOTENCY_ENFORCED"
+      }
+    },
+    {
       "name": "tool-idempotency-without-use-token",
       "binding": {
         "execution_binding": "external",
