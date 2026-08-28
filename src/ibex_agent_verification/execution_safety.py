@@ -87,6 +87,34 @@ class ConsumptionBinding:
     use_token_bound: bool
     endpoint_idempotency_enforced: bool
 
+    def __post_init__(self) -> None:
+        """Enforce the closed record contract for every construction path."""
+
+        if (
+            not isinstance(self.execution_binding, str)
+            or self.execution_binding not in _EXECUTION_BINDINGS
+        ):
+            raise ValueError("execution_binding must be 'internal' or 'external'")
+        if (
+            not isinstance(self.consumption_authority, str)
+            or not self.consumption_authority
+        ):
+            raise ValueError("consumption_authority must be a non-empty string")
+        if not isinstance(self.consumption_mode, ConsumptionMode):
+            raise ValueError("consumption_mode is not a supported closed value")
+        if not isinstance(self.executor_scope, ExecutorScope):
+            raise ValueError("executor_scope is not a supported closed value")
+        if not isinstance(self.dispatch_commitment_bound, bool):
+            raise ValueError("dispatch_commitment_bound must be boolean")
+        if self.use_token is not None and (
+            not isinstance(self.use_token, str) or not self.use_token
+        ):
+            raise ValueError("use_token must be null or a non-empty string")
+        if not isinstance(self.use_token_bound, bool):
+            raise ValueError("use_token_bound must be boolean")
+        if not isinstance(self.endpoint_idempotency_enforced, bool):
+            raise ValueError("endpoint_idempotency_enforced must be boolean")
+
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "ConsumptionBinding":
         """Parse the closed v1 record without guessing missing semantics."""
@@ -103,7 +131,10 @@ class ConsumptionBinding:
             raise ValueError(f"consumption binding contains unknown fields: {unknown}")
 
         execution_binding = value["execution_binding"]
-        if not isinstance(execution_binding, str) or execution_binding not in _EXECUTION_BINDINGS:
+        if (
+            not isinstance(execution_binding, str)
+            or execution_binding not in _EXECUTION_BINDINGS
+        ):
             raise ValueError("execution_binding must be 'internal' or 'external'")
 
         consumption_authority = value["consumption_authority"]
@@ -113,7 +144,9 @@ class ConsumptionBinding:
         try:
             consumption_mode = ConsumptionMode(value["consumption_mode"])
         except (TypeError, ValueError) as exc:
-            raise ValueError("consumption_mode is not a supported closed value") from exc
+            raise ValueError(
+                "consumption_mode is not a supported closed value"
+            ) from exc
 
         try:
             executor_scope = ExecutorScope(value["executor_scope"])
@@ -125,9 +158,7 @@ class ConsumptionBinding:
             raise ValueError("dispatch_commitment_bound must be boolean")
 
         use_token = value["use_token"]
-        if use_token is not None and (
-            not isinstance(use_token, str) or not use_token
-        ):
+        if use_token is not None and (not isinstance(use_token, str) or not use_token):
             raise ValueError("use_token must be null or a non-empty string")
 
         use_token_bound = value["use_token_bound"]

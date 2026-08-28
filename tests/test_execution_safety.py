@@ -7,8 +7,10 @@ import unittest
 
 from ibex_agent_verification.execution_safety import (
     ConsumptionBinding,
+    ConsumptionMode,
     ExecutionGuarantee,
     ExecutionSafetyVerdict,
+    ExecutorScope,
     verify_execution_safety,
 )
 
@@ -190,6 +192,23 @@ class ExecutionSafetyTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "use_token"):
             ConsumptionBinding.from_mapping({**base, "use_token": ""})
+
+    def test_direct_construction_rejects_empty_use_token(self):
+        for mode in (ConsumptionMode.TOOL_IDEMPOTENT, ConsumptionMode.OUTBOX_ATOMIC):
+            with (
+                self.subTest(mode=mode),
+                self.assertRaisesRegex(ValueError, "use_token"),
+            ):
+                ConsumptionBinding(
+                    execution_binding="external",
+                    consumption_authority="tool-endpoint",
+                    consumption_mode=mode,
+                    executor_scope=ExecutorScope.MULTI_INSTANCE,
+                    dispatch_commitment_bound=mode is ConsumptionMode.OUTBOX_ATOMIC,
+                    use_token="",
+                    use_token_bound=True,
+                    endpoint_idempotency_enforced=True,
+                )
 
 
 if __name__ == "__main__":
