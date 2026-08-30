@@ -1,0 +1,146 @@
+name: ProofPath PoCI External Consumer
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/proofpath-poci-consumer.yml"
+      - "qa/poci/**"
+      - "scripts/verify_proofpath_poci_consumer.py"
+      - "tests/test_proofpath_poci_consumer.py"
+      - "docs/PROOFPATH_POCI_EXTERNAL_CONSUMER.md"
+  workflow_dispatch:
+
+concurrency:
+  group: proofpath-poci-consumer-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  external-consumer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Ibex consumer
+        uses: actions/checkout@v4
+
+      - name: Checkout exact ProofPath producer code
+        uses: actions/checkout@v4
+        with:
+          repository: safal207/ProofPath
+          ref: a726f2a8b3bd9c6c4469be542e30bb54b230d510
+          path: external/proofpath
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile and run mutation tests
+        run: |
+          python3 -m py_compile \
+            scripts/verify_proofpath_poci_consumer.py \
+            tests/test_proofpath_poci_consumer.py
+          python3 -m unittest tests.test_proofpath_poci_consumer -v
+
+      - name: Verify producer checkout identity
+        run: |
+          set -euo pipefail
+          actual="$(git -C external/proofpath rev-parse HEAD)"
+          expected="a726f2a8b3bd9c6c4469be542e30bb54b230d510"
+          test "$actual" = "$expected"
+          echo "PRODUCER_SHA=$actual" >> "$GITHUB_ENV"
+
+      - name: Recompute ProofPath multi-graph independently
+        run: |
+          mkdir -p artifacts/proofpath-poci-consumer
+          python3 external/proofpath/scripts/build_poci_multigraph.py \
+            external/proofpath/examples/poci-witness/multigraph/source.valid.json \
+            --pretty \
+            --output artifacts/proofpath-poci-consumer/recomputed-multigraph-report.json
+
+      - name: Verify ProofPath keyless quorum attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify \
+            qa/poci/proofpath-attested-quorum-report.json \
+            --repo safal207/ProofPath \
+            --signer-workflow \
+              safal207/ProofPath/.github/workflows/poci-signed-witness-network.yml \
+            --source-digest 3a5dde912c44e0957204d3df733e712c596455f1 \
+            --signer-digest 3a5dde912c44e0957204d3df733e712c596455f1 \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            --deny-self-hosted-runners \
+            --format json \
+            > artifacts/proofpath-poci-consumer/producer-attestation-result.json
+
+      - name: Build external consumer receipt
+        run: |
+          python3 scripts/verify_proofpath_poci_consumer.py \
+            qa/poci/external-consumer-policy.json \
+            --producer-report qa/poci/proofpath-attested-quorum-report.json \
+            --recomputed-report \
+              artifacts/proofpath-poci-consumer/recomputed-multigraph-report.json \
+            --producer-source \
+              external/proofpath/examples/poci-witness/multigraph/source.valid.json \
+            --producer-checkout-sha "$PRODUCER_SHA" \
+            --attestation-result \
+              artifacts/proofpath-poci-consumer/producer-attestation-result.json \
+            --consumer-repository "$GITHUB_REPOSITORY" \
+            --consumer-workflow \
+              "$GITHUB_REPOSITORY/.github/workflows/proofpath-poci-consumer.yml" \
+            --consumer-sha "${{ github.sha }}" \
+            --pretty \
+            --output artifacts/proofpath-poci-consumer/ibex-consumer-receipt.json
+
+      - name: Guard accepted receipt
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          receipt = json.loads(
+              Path(
+                  "artifacts/proofpath-poci-consumer/ibex-consumer-receipt.json"
+              ).read_text(encoding="utf-8")
+          )
+          if receipt.get("decision") != "ACCEPT" or receipt.get("valid") is not True:
+              raise SystemExit("Ibex external consumer receipt did not ACCEPT")
+          accepted = receipt.get("accepted_consensus", {})
+          if len(accepted.get("graph_roots", {})) != 6:
+              raise SystemExit("external receipt must commit six graph roots")
+          if accepted.get("consensus_root") != (
+              "sha256:f2bc99fe96f24942e5cc9c87f25c48167d875041e85170dbb354c2bc0cd97f5f"
+          ):
+              raise SystemExit("external receipt accepted an unexpected consensus root")
+          verification = receipt.get("verification", {})
+          required = (
+              "producer_attestation_verified",
+              "producer_report_digest_verified",
+              "producer_code_sha_verified",
+              "source_recomputed",
+              "six_graph_roots_recomputed",
+              "transition_cells_recomputed",
+          )
+          if any(verification.get(key) is not True for key in required):
+              raise SystemExit("external receipt verification flags are incomplete")
+          print("PASS Ibex external PoCI consumer receipt")
+          PY
+
+      - name: Attest Ibex consumer receipt
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/proofpath-poci-consumer/ibex-consumer-receipt.json
+
+      - name: Upload external consumer evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ibex-proofpath-poci-consumer-${{ github.run_id }}
+          path: artifacts/proofpath-poci-consumer
+          if-no-files-found: error
+          retention-days: 14

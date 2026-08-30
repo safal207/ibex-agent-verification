@@ -1,0 +1,36 @@
+{
+  "profile_id": "ibex.poci.external-consumer-policy.v0.1",
+  "producer": {
+    "repository": "safal207/ProofPath",
+    "code_sha": "a726f2a8b3bd9c6c4469be542e30bb54b230d510",
+    "attestation_source_sha": "3a5dde912c44e0957204d3df733e712c596455f1",
+    "attestation_signer_sha": "3a5dde912c44e0957204d3df733e712c596455f1",
+    "workflow": "safal207/ProofPath/.github/workflows/poci-signed-witness-network.yml",
+    "report_path": "proofpath-attested-quorum-report.json",
+    "report_sha256": "sha256:87119740993bc570749542ef4e06a8cf0ce44cebd77e88eb5aa1b432d0228fde",
+    "source_path": "examples/poci-witness/multigraph/source.valid.json"
+  },
+  "expected": {
+    "round_id": "poci-demo-round-001",
+    "consensus_root": "sha256:f2bc99fe96f24942e5cc9c87f25c48167d875041e85170dbb354c2bc0cd97f5f",
+    "source_digest": "sha256:807bde72ed45ae1566443dec20c85b02f0d6734e4aa4bf9a9cfe08ce2e4c97fa",
+    "graph_set_id": "mg_compute_purchase_001",
+    "poci_envelope_id": "env_valid_action",
+    "graph_roots": {
+      "causal": "sha256:482d5076dc3a80dac8f4ed179491b4d3e153ece780fcebdd81289ffbdc6fd7f4",
+      "intent": "sha256:3a26e5badd5379f69203dfe972143e0f3969b12e5f5c55cd641aa7f2bc41a0b3",
+      "authority": "sha256:6af348f1245a5a1f3b59b0070653bbf4d512a792e54554918058f9692e33bb0c",
+      "state_transition": "sha256:41807cd0bacac6908867ce6839114d3028ec62550eb7cee0fdb50006e3887c10",
+      "evidence": "sha256:1fed70f4f198ce5a993880e283763db8c0dc576824f042619637b37f6d745899",
+      "time_continuity": "sha256:4b28006fc3a21f6afce98e4e4e661fa204060be976110bed3bb571af3d7e4ccc"
+    },
+    "transition_cells_root": "sha256:b5d5fd4ba2638fb685913e621295a1c70b5aff550d14ea5b2d8c0f49bdba7f45",
+    "computed_multigraph_root": "sha256:98543066cb16c06b5300b56749af43b2fdd48eed47650488ac57987156e38219",
+    "verified_attestation_count": 3
+  },
+  "consumer": {
+    "repository": "safal207/ibex-agent-verification",
+    "workflow": "safal207/ibex-agent-verification/.github/workflows/proofpath-poci-consumer.yml",
+    "consumer_id": "ibex-proofpath-poci-consumer"
+  }
+}

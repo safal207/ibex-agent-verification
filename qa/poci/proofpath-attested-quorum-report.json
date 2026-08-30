@@ -1,0 +1,79 @@
+{
+  "profile_id": "proofpath.poci.multigraph.witness-quorum.v0.1",
+  "round_id": "poci-demo-round-001",
+  "decision": "ACCEPT",
+  "primary_reason_code": null,
+  "reason_codes": [],
+  "findings": [],
+  "quorum": 2,
+  "configured_witness_count": 3,
+  "valid_statement_count": 3,
+  "agreeing_witnesses": [
+    "witness-alpha",
+    "witness-beta",
+    "witness-gamma"
+  ],
+  "dissenting_witnesses": [],
+  "invalid_witnesses": [],
+  "non_accepting_witnesses": [],
+  "process_failures": [],
+  "statement_summaries": [
+    {
+      "witness_id": "witness-alpha",
+      "operator_id": "operator-alpha",
+      "decision": "ACCEPT",
+      "statement_root": "sha256:3ae5755c181585411cd95617f40a69b1d6954e5e5b5ae4ae81aa0345124b8e8b",
+      "vote_key": "sha256:e4f27eaddeab6bfca88fc5222b6c1fe9afe66387d346fb83bcfaf0e4ed71c914"
+    },
+    {
+      "witness_id": "witness-beta",
+      "operator_id": "operator-beta",
+      "decision": "ACCEPT",
+      "statement_root": "sha256:3a4af53de8644174eb947b054518c1763ccc4ad17d19494deb128a3bdb4ff8b3",
+      "vote_key": "sha256:e4f27eaddeab6bfca88fc5222b6c1fe9afe66387d346fb83bcfaf0e4ed71c914"
+    },
+    {
+      "witness_id": "witness-gamma",
+      "operator_id": "operator-gamma",
+      "decision": "ACCEPT",
+      "statement_root": "sha256:c7999c57ee16378bf7e6f05d47ac1e9c0ae9faf14933a9d351e5cf58cd832421",
+      "vote_key": "sha256:e4f27eaddeab6bfca88fc5222b6c1fe9afe66387d346fb83bcfaf0e4ed71c914"
+    }
+  ],
+  "consensus": {
+    "profile_id": "proofpath.poci.multigraph.witness-quorum.v0.1",
+    "round_id": "poci-demo-round-001",
+    "quorum": 2,
+    "agreeing_witnesses": [
+      "witness-alpha",
+      "witness-beta",
+      "witness-gamma"
+    ],
+    "source_digest": "sha256:807bde72ed45ae1566443dec20c85b02f0d6734e4aa4bf9a9cfe08ce2e4c97fa",
+    "graph_set_id": "mg_compute_purchase_001",
+    "poci_envelope_id": "env_valid_action",
+    "graph_roots": {
+      "causal": "sha256:482d5076dc3a80dac8f4ed179491b4d3e153ece780fcebdd81289ffbdc6fd7f4",
+      "intent": "sha256:3a26e5badd5379f69203dfe972143e0f3969b12e5f5c55cd641aa7f2bc41a0b3",
+      "authority": "sha256:6af348f1245a5a1f3b59b0070653bbf4d512a792e54554918058f9692e33bb0c",
+      "state_transition": "sha256:41807cd0bacac6908867ce6839114d3028ec62550eb7cee0fdb50006e3887c10",
+      "evidence": "sha256:1fed70f4f198ce5a993880e283763db8c0dc576824f042619637b37f6d745899",
+      "time_continuity": "sha256:4b28006fc3a21f6afce98e4e4e661fa204060be976110bed3bb571af3d7e4ccc"
+    },
+    "transition_cells_root": "sha256:b5d5fd4ba2638fb685913e621295a1c70b5aff550d14ea5b2d8c0f49bdba7f45",
+    "computed_multigraph_root": "sha256:98543066cb16c06b5300b56749af43b2fdd48eed47650488ac57987156e38219"
+  },
+  "consensus_root": "sha256:f2bc99fe96f24942e5cc9c87f25c48167d875041e85170dbb354c2bc0cd97f5f",
+  "honest_limitations": [
+    "witness jobs use separate GitHub-hosted runners",
+    "one GitHub repository still controls all three jobs",
+    "external organizational independence is not yet proven"
+  ],
+  "valid": true,
+  "attestation_profile": "github-keyless-slsa-provenance",
+  "verified_attestation_count": 3,
+  "signer_workflow": "safal207/ProofPath/.github/workflows/poci-signed-witness-network.yml",
+  "source_digest": "3a5dde912c44e0957204d3df733e712c596455f1",
+  "signer_digest": "3a5dde912c44e0957204d3df733e712c596455f1",
+  "self_hosted_runners_denied": true
+}
